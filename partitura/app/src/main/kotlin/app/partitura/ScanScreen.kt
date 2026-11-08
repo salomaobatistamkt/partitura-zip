@@ -112,6 +112,11 @@ fun ScanScreen(state: AppState) {
         }.start()
     }
 
+    LaunchedEffect(state.scanUri) {
+        val u = state.scanUri
+        if (u != null && !busy) { val pdf = state.scanIsPdf; state.scanUri = null; lastUri = u; lastIsPdf = pdf; run(u, pdf) }
+    }
+
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val type = ctx.contentResolver.getType(uri) ?: ""

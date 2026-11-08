@@ -78,14 +78,15 @@ private val AREAS = listOf(
     Area(8, "Ouvir", "Tocar vira partitura", Ic.PIANO, Violet),
     Area(9, "Ler", "PDF vira notas", Ic.OPEN, Mint),
 )
-private val SECTIONS = listOf("CRIAR" to listOf(0, 1, 8, 9, 7, 2), "APRENDER" to listOf(3, 4), "ARQUIVOS" to listOf(5))
-private val PHONE_TABS = listOf(0, 1, 8, 7, 99)
+private val SECTIONS = listOf("CRIAR" to XX to listOf(3, 4), "ARQUIVOS" to listOf(5))
+private val PHONE_TABS = listOf(0, 1, 9, 8, 99)
 
 @Composable
 fun Root(state: AppState) {
     var tab by rememberSaveable { mutableStateOf(0) }
     val snack = remember { SnackbarHostState() }
     state.goStudio = { tab = 1 }
+    state.goScan = { tab = 9 }
     state.goServer = { tab = 6 }
     state.goHome = { tab = 0 }
     LaunchedEffect(state.message) { state.message?.let { snack.showSnackbar(it); state.message = null } }
@@ -138,15 +139,6 @@ fun Root(state: AppState) {
             onDismissRequest = {}, confirmButton = {},
             title = { Text("Lendo a partitura…") },
             text = { Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { CircularProgressIndicator(); Spacer(Modifier.height(12.dp)); Text(if (state.importStage.isBlank()) "O servidor está reconhecendo as notas. Pode levar um minuto." else state.importStage.replaceFirstChar { it.uppercase() } + "…") } },
-        )
-    }
-    if (state.needOmr) {
-        AlertDialog(
-            onDismissRequest = { state.needOmr = false },
-            title = { Text("Ler PDF e foto") },
-            text = { Text("Reconhecer notas em PDF ou foto precisa do seu servidor de leitura privado, ainda não pareado com este aparelho. Em Ajustes → Servidor privado há o passo a passo (protegido pelo bloqueio do tablet). Enquanto isso, abra arquivos MusicXML.") },
-            confirmButton = { Button(onClick = { state.needOmr = false; tab = 6 }) { Text("Abrir Servidor privado") } },
-            dismissButton = { TextButton(onClick = { state.needOmr = false }) { Text("Agora não") } },
         )
     }
 }

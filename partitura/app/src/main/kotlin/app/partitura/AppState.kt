@@ -215,6 +215,10 @@ class AppState(private val app: Context) {
     var rangeTo by mutableIntStateOf(0)
     var importing by mutableStateOf(false)
     var needOmr by mutableStateOf(false)
+    /** PDF/foto escolhido na tela Início: a aba Ler lê no aparelho (motor próprio, sem servidor). */
+    var scanUri by mutableStateOf<Uri?>(null)
+    var scanIsPdf by mutableStateOf(true)
+    var goScan: () -> Unit = {}
     var goStudio: () -> Unit = {}
     var goServer: () -> Unit = {}
     var goHome: () -> Unit = {}
@@ -417,7 +421,7 @@ class AppState(private val app: Context) {
         val bytes = try { cr.openInputStream(uri)!!.use { it.readBytes() } } catch (e: Exception) { message = "Não consegui abrir o arquivo (${e.message})."; return }
         val kind = sniff(bytes)
         when (kind) {
-            "pdf", "image" -> readWithServer(bytes, kind)
+            "pdf", "image" -> { scanUri = uri; scanIsPdf = kind == "pdf"; goScan() }
             "midi" -> message = "Importar MIDI ainda não está disponível. Use MusicXML (.musicxml, .xml, .mxl)."
             else -> try {
                 val s = MusicXml.parseAny(bytes)
