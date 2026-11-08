@@ -1,22 +1,32 @@
-# Partitura 0.2
+# Partitura (Android, Kotlin + Jetpack Compose)
 
-App Android (Kotlin + Jetpack Compose) para tablet e celular. Seis áreas: Início, Editor, Reprodução, Transposição, Teoria e Arquivos.
+Aplicativo de partituras para celular e tablet. Funciona offline.
 
-## O que existe
-- **Abrir**: MusicXML (.musicxml, .xml, .mxl) e 3 partituras de exemplo; projetos salvos no aparelho; novo projeto (tonalidade, compasso, nº de compassos).
-- **Editor**: pauta com clave de Sol e Fá, armadura, fórmula de compasso, acidentes; toque numa nota para selecionar; teclado virtual que grava a nota e avança; subir/descer semitom ou grau; ♯ ♭ ♮; duração e ponto; nota/pausa; ligadura; inserir/apagar; adicionar/remover compasso; desfazer/refazer; aviso de compasso incompleto; salvar.
-- **Reprodução**: tocar/parar, loop, andamento 10–240 bpm sem mudar o tom (atalhos 0,2x a 1,5x), trecho por compassos, volume por instrumento.
-- **Transposição**: por semitons, para uma tonalidade, instrumentos em Si♭/Mi♭/Fá, com prévia e opção de aplicar (desfazível).
-- **Teoria**: escalas (8 tipos), acordes (7 tipos), campo harmônico (tríades e sétimas), ciclo das quintas; ouvir e abrir no editor.
-- **Arquivos**: exportar MusicXML, MIDI, WAV, PNG e PDF.
-- Tema escuro e claro.
+## O que o app faz hoje (v0.3)
+- **Abrir**: MusicXML (.musicxml, .xml, .mxl), inclusive arquivos do MuseScore/Finale com piano de duas pautas.
+  PDF e foto: pelo servidor de leitura em `omr-server/` (ver README dele).
+- **Estúdio**: pauta com notação de verdade (fonte Bravura: clave de Sol e Fá, vigas, ligaduras, acidentes, armadura, compasso),
+  reprodução com cursor que acompanha a música, rolagem automática e **piano embaixo** mostrando as notas tocando.
+  Andamento sem mudar o tom, repetição, trecho, volume por instrumento. Edição: tocar na nota, teclado de piano, duração, acidentes,
+  ligadura, pausa, inserir/apagar, compassos, desfazer/refazer, e "escrever tocando na pauta" (dedo ou caneta).
+- **Transpor**: por semitons, por tonalidade ou instrumento transpositor, com prévia; aplicar à partitura.
+- **Teoria**: círculo das quintas interativo (gira, mostra os graus I IV V ii iii vi vii°), escalas (8 tipos), acordes, campo harmônico,
+  tudo com piano e áudio.
+- **Arquivos**: salvar projetos; exportar MusicXML, MIDI, WAV, PNG, PDF.
 
-## O que NÃO existe ainda
-Leitura por foto/PDF/câmera (OMR, impresso ou manuscrito), escrita com caneta, assistente de IA, nuvem, exportar MP3, importar MIDI, separação automática de vozes. O som é um sintetizador simples. A pauta mostra cada instrumento em sua própria linha (sem alinhar compassos entre instrumentos) e não desenha vigas, só colchetes.
+## Ainda não existe
+Importar MIDI, exportar MP3, reconhecimento de escrita à mão, assistente de IA, instrumentos reais (o som é um piano sintetizado),
+pressão da caneta.
 
-## Testes
-- Núcleo (lógica, sem Android): 44 testes automáticos, rodados no GitHub Actions antes de compilar (veja `.github/workflows`).
-- Interface Android: **não foi compilada nem executada pelo autor**. Se a compilação falhar, o log do GitHub Actions mostra o erro.
+## Estrutura
+- `core/`: lógica sem Android (modelo, MusicXML, transposição, teoria, edição, síntese, gravação da pauta). Testada com `core/src/test`.
+- `app/`: interface Compose. O código de `core/` é compilado dentro do app.
+- `omr-server/`: servidor Docker de leitura de PDF/foto (homr).
 
-## Gerar o APK
-GitHub: envie esta pasta, aba Actions > "Build APK" > baixe o artefato `partitura-debug-apk`. Ou Android Studio: abra a pasta e Build > Build APK.
+## Compilar
+O GitHub Actions (`.github/workflows/build-apk.yml`) roda os testes do núcleo, gera o APK e publica em **Releases → Partitura - APK mais recente**.
+Localmente: `gradle :app:assembleDebug` (Android SDK 35, JDK 17).
+A assinatura de debug é fixa (`app/debug.keystore`), então novas versões instalam por cima da anterior.
+
+## Licenças
+Bravura (SIL OFL 1.1) em `app/src/main/assets`. O servidor OMR usa homr (AGPL-3.0).
