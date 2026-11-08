@@ -1,0 +1,96 @@
+package app.partitura.core
+
+import kotlin.math.roundToInt
+
+/** Operações de edição. Todas mudam a partitura recebida (o chamador guarda o desfazer). */
+object Edit {
+    private fun note(s: Score, p: Int, m: Int, n: Int): Note? = s.parts.getOrNull(p)?.measures?.getOrNull(m)?.notes?.getOrNull(n)
+    private fun put(s: Score, p: Int, m: Int, n: Int, v: Note) { s.parts[p].measures[m].notes[n] = v }
+
+    fun shiftSemitones(s: Score, p: Int, m: Int, n: Int, d: Int) {
+        val nt = note(s, p, m, n) ?: return
+        val pt = nt.pitch ?: return
+        put(s, p, m, n, nt.copy(pitch = Spell.forMidi((pt.midi + d).coerceIn(24, 108), s.fifths)))
+    }
+
+    fun shiftDiatonic(s: Score, p: Int, m: Int, n: Int, d: Int) {
+        val nt = note(s, p, m, n) ?: return
+        val pt = nt.pitch ?: return
+        val idx = pt.octave * 7 + Pitch.STEPS.indexOf(pt.step) + d
+        val step = Pitch.STEPS[Math.floorMod(idx, 7)]
+        put(s, p, m, n, nt.copy(pitch = Pitch(step, Spell.keyAlter(s.fifths, step), Math.floorDiv(idx, 7))))
+    }
+
+    fun setAlter(s: Score, p: Int, m: Int, n: Int, alter: Int) {
+        val nt = note(s, p, m, n) ?: return
+        val pt = nt.pitch ?: return
+        put(s, p, m, n, nt.copy(pitch = pt.copy(alter = alter)))
+    }
+
+    fun setPitch(s: Score, p: Int, m: Int, n: Int, midi: Int) {
+        val nt = note(s, p, m, n) ?: return
+        put(s, p, m, n, nt.copy(pitch = Spell.forMidi(midi, s.fifths)))
+    }
+
+    fun setDuration(s: Score, p: Int, m: Int, n: Int, quarters: Double) {
+        val nt = note(s, p, m, n) ?: return
+        put(s, p, m, n, nt.copy(duration = (quarters * s.divisions).roundToInt().coerceAtLeast(1)))
+    }
+
+    fun toggleDot(s: Score, p: Int, m: Int, n: Int) {
+        val nt = note(s, p, m, n) ?: return
+        val d = nt.duration
+        val base = if (d % 3 == 0 && (d / 3 * 2) > 0 && isPow2(d / 3 * 2)) d / 3 * 2 else null
+        put(s, p, m, n, nt.copy(duration = base ?: (d * 3 / 2).coerceAtLeast(1)))
+    }
+    private fun isPow2(x: Int) = x > 0 && (x and (x - 1)) == 0
+
+    fun toggleRest(s: Score, p: Int, m: Int, n: Int) {
+        val nt = note(s, p, m, n) ?: return
+        val clefDefault = if (s.parts[p].clef == 'F') Pitch('C', 0, 3) else Pitch('B', 0, 4)
+        put(s, p, m, n, nt.copy(pitch = if (nt.pitch == null) clefDefault else null, chord = false))
+    }
+
+    fun toggleTie(s: Score, p: Int, m: Int, n: Int) {
+        val nt = note(s, p, m, n) ?: return
+        put(s, p, m, n, nt.copy(tieStart = !nt.tieStart))
+        // marca o fim da ligadura na próxima nota
+        val meas = s.parts[p].measures
+        var mm = m; var nn = n + 1
+        if (nn >= meas[mm].notes.size) { mm++; nn = 0 }
+        val nx = meas.getOrNull(mm)?.notes?.getOrNull(nn) ?: return
+        meas[mm].notes[nn] = nx.copy(tieStop = !nt.tieStart)
+    }
+
+    /** Insere depois da nota selecionada uma cópia dela (ou pausa se não houver nota). Devolve o novo índice. */
+    fun insertAfter(s: Score, p: Int, m: Int, n: Int): Int {
+        val list = s.parts[p].measures[m].notes
+        val base = list.getOrNull(n)
+        val new = (base ?: Note(null, s.divisions)).copy(chord = false, tieStart = false, tieStop = false)
+        val at = (n + 1).coerceIn(0, list.size)
+        list.add(at, new)
+        return at
+    }
+
+    fun delete(s: Score, p: Int, m: Int, n: Int) {
+        val list = s.parts[p].measures.getOrNull(m)?.notes ?: return
+        if (n in list.indices) list.removeAt(n)
+    }
+
+    fun addMeasure(s: Score) {
+        for (part in s.parts) part.measures += Measure((part.measures.lastOrNull()?.number ?: 0) + 1,
+            mutableListOf(Note(null, s.divisions * 4 * s.beats / s.beatType)))
+    }
+
+    fun deleteMeasure(s: Score, m: Int) {
+        for (part in s.parts) if (part.measures.size > 1 && m in part.measures.indices) part.measures.removeAt(m)
+        for (part in s.parts) part.measures.forEachIndexed { i, mm -> part.measures[i] = Measure(i + 1, mm.notes) }
+    }
+
+    fun blank(title: String, fifths: Int, beats: Int, beatType: Int, measures: Int, tempo: Int = 100): Score {
+        val s = Score(title, 4, fifths, beats, beatType, tempo)
+        val len = 4 * 4 * beats / beatType
+        s.parts += Part("P1", "Piano", MutableList(measures) { Measure(it + 1, mutableListOf(Note(null, len))) })
+        return s
+    }
+}

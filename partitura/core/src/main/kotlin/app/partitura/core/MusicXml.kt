@@ -9,6 +9,38 @@ object MusicXml {
     private fun Element.kid(tag: String) = kids(tag).firstOrNull()
     private fun Element.text(tag: String) = kid(tag)?.textContent?.trim()
 
+    /** Aceita .musicxml/.xml e .mxl (zip). Garante divisões múltiplas de 4. */
+    fun parseAny(data: ByteArray): Score {
+        val xml = if (data.size > 4 && data[0] == 'P'.code.toByte() && data[1] == 'K'.code.toByte()) unzipMxl(data) else data
+        return normalizeDivisions(parse(xml))
+    }
+
+    private fun unzipMxl(data: ByteArray): ByteArray {
+        val entries = HashMap<String, ByteArray>()
+        java.util.zip.ZipInputStream(ByteArrayInputStream(data)).use { z ->
+            var e = z.nextEntry
+            while (e != null) { if (!e.isDirectory) entries[e.name] = z.readBytes(); e = z.nextEntry }
+        }
+        val container = entries["META-INF/container.xml"]
+        var path: String? = null
+        if (container != null) {
+            val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(ByteArrayInputStream(container))
+            val rf = doc.getElementsByTagName("rootfile")
+            if (rf.length > 0) path = (rf.item(0) as Element).getAttribute("full-path")
+        }
+        return entries[path] ?: entries.entries.firstOrNull { !it.key.startsWith("META-INF") && it.key.endsWith(".xml") }?.value
+            ?: throw IllegalArgumentException("Arquivo .mxl sem partitura")
+    }
+
+    fun normalizeDivisions(s: Score): Score {
+        fun gcd(a: Int, b: Int): Int = if (b == 0) a else gcd(b, a % b)
+        val f = 4 / gcd(s.divisions, 4)
+        if (f == 1) return s
+        s.divisions *= f
+        for (p in s.parts) for (m in p.measures) for (i in m.notes.indices) m.notes[i] = m.notes[i].copy(duration = m.notes[i].duration * f)
+        return s
+    }
+
     fun parse(xml: ByteArray): Score {
         val f = DocumentBuilderFactory.newInstance()
         f.isNamespaceAware = false
@@ -29,6 +61,7 @@ object MusicXml {
                     when (n.tagName) {
                         "attributes" -> {
                             n.text("divisions")?.toIntOrNull()?.let { score.divisions = it }
+                            n.kid("clef")?.text("sign")?.firstOrNull()?.let { if (it == 'F') part.clef = 'F' else if (it == 'G') part.clef = 'G' }
                             n.kid("key")?.text("fifths")?.toIntOrNull()?.let { score.fifths = it }
                             n.kid("time")?.let { t -> t.text("beats")?.toIntOrNull()?.let { score.beats = it }; t.text("beat-type")?.toIntOrNull()?.let { score.beatType = it } }
                         }
@@ -60,7 +93,7 @@ object MusicXml {
             sb.append("  <part id=\"${esc(p.id)}\">\n")
             p.measures.forEachIndexed { i, m ->
                 sb.append("    <measure number=\"${m.number}\">\n")
-                if (i == 0) sb.append("      <attributes><divisions>${s.divisions}</divisions><key><fifths>${s.fifths}</fifths></key><time><beats>${s.beats}</beats><beat-type>${s.beatType}</beat-type></time></attributes>\n      <direction><sound tempo=\"${s.tempo}\"/></direction>\n")
+                if (i == 0) sb.append("      <attributes><divisions>${s.divisions}</divisions><key><fifths>${s.fifths}</fifths></key><time><beats>${s.beats}</beats><beat-type>${s.beatType}</beat-type></time>${if (p.clef == 'F') "<clef><sign>F</sign><line>4</line></clef>" else "<clef><sign>G</sign><line>2</line></clef>"}</attributes>\n      <direction><sound tempo=\"${s.tempo}\"/></direction>\n")
                 for (n in m.notes) {
                     sb.append("      <note>")
                     if (n.chord) sb.append("<chord/>")

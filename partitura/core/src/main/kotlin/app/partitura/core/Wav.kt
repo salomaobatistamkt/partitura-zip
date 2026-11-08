@@ -42,6 +42,21 @@ object Synth {
         return ev
     }
 
+    /** Início de cada compasso (segundos); tamanho = compassos + 1. Usa a primeira parte. */
+    fun measureTimes(s: Score, tempo: Int = s.tempo): DoubleArray {
+        val sec = 60.0 / tempo / s.divisions
+        val part = s.parts.firstOrNull() ?: return doubleArrayOf(0.0)
+        val out = DoubleArray(part.measures.size + 1)
+        var t = 0
+        part.measures.forEachIndexed { i, m ->
+            out[i] = t * sec
+            val per = m.notes.filter { !it.chord }.groupBy { it.voice }.values.maxOfOrNull { l -> l.sumOf { it.duration } } ?: 0
+            t += per
+        }
+        out[part.measures.size] = t * sec
+        return out
+    }
+
     fun render(s: Score, tempo: Int = s.tempo, volumes: List<Double> = emptyList(), fromSec: Double = 0.0, toSec: Double = Double.MAX_VALUE): ShortArray {
         val all = events(s, tempo).filter { it.startSec + it.durSec > fromSec && it.startSec < toSec }
         val end = (all.maxOfOrNull { minOf(it.startSec + it.durSec, toSec) } ?: fromSec) + 1.0
