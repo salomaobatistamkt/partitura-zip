@@ -44,10 +44,12 @@ object MusicXml {
     fun parse(xml: ByteArray): Score {
         val f = DocumentBuilderFactory.newInstance()
         f.isNamespaceAware = false
-        f.setFeature("http://apache.org/xml/features/disallow-doctype-decl", false)
-        f.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
-        f.setFeature("http://xml.org/sax/features/external-general-entities", false)
-        f.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+        // Recursos de segurança do parser: o Android não aceita todos, então cada um é opcional.
+        for ((k, v) in listOf(
+            "http://apache.org/xml/features/nonvalidating/load-external-dtd" to false,
+            "http://xml.org/sax/features/external-general-entities" to false,
+            "http://xml.org/sax/features/external-parameter-entities" to false,
+        )) { try { f.setFeature(k, v) } catch (_: Exception) {} }
         val root = f.newDocumentBuilder().parse(ByteArrayInputStream(xml)).documentElement
         require(root.tagName == "score-partwise") { "Somente MusicXML 'score-partwise' é suportado" }
         val names = root.kid("part-list")?.kids("score-part")?.associate { it.getAttribute("id") to (it.text("part-name") ?: it.getAttribute("id")) } ?: emptyMap()
