@@ -20,6 +20,8 @@ class CreativeSettings(
     val chordsPerBar: Int = 1, val sevenths: Boolean = false,
     /** permite começar com anacruse (sílaba fraca antes do tempo forte) */
     val pickup: Boolean = true,
+    /** sequência de acordes escolhida pelo usuário (um item por compasso, repetida); null = o app escolhe os acordes */
+    val chords: List<List<Harmony>>? = null,
 )
 
 /** Grade métrica do compasso: unidade de tempo, grupos acentuados e peso de cada pulso (colcheia). */
@@ -197,8 +199,9 @@ object Compose {
         }
     }
 
-    fun melodyDegrees(lines: List<Lyrics.Line>, slots: List<Slot>, st: CreativeSettings, g: Grid, key: TonalKey, rnd: Random): List<Int> {
+    fun melodyDegrees(lines: List<Lyrics.Line>, slots: List<Slot>, st: CreativeSettings, g: Grid, key: TonalKey, rnd: Random, chordPcs: ((Int) -> Set<Int>?)? = null): List<Int> {
         // faixa de graus permitida
+        fun tone(d: Int, set: Set<Int>) = key.pcOf(d) in set || (key.minor && Math.floorMod(d, 7) == 6 && (key.pcOf(d) + 1) % 12 in set)
         val lo = (-40..40).first { key.midi(it) >= st.low }
         val hi = (-40..40).last { key.midi(it) <= st.high }
         val center = (lo + hi) / 2
@@ -220,11 +223,15 @@ object Compose {
                 val startIdx = idx
                 // linha com o mesmo desenho de acentos de uma anterior da estrofe: repete o contorno (motivo), mudando só o fim
                 val sig = line.syls.joinToString("") { it.stress.toString() }
-                val twin = stanzaMem.firstOrNull { it.first.syls.size == m && it.first.syls.joinToString("") { s -> s.stress.toString() } == sig && j >= 2 }
+                val twin = stanzaMem.firstOrNull { it.first.syls.size == m && it.first.syls.joinToString("") { s -> s.stress.toString() } == sig && j >= 2 && chordPcs == null }
                 val tgtCad = cad[j]
                 // grau final: o mais próximo do centro com o resto desejado
                 fun nearest(modDeg: Int, ref: Int): Int = (lo..hi).filter { Math.floorMod(it, 7) == modDeg }.minByOrNull { abs(it - ref) } ?: ref
                 var endDeg = nearest(tgtCad, if (j == nl - 1) center - 1 else prevEnd)
+                if (chordPcs != null) {
+                    val set = chordPcs(slots[startIdx + m - 1].t)
+                    if (set != null && !tone(endDeg, set)) endDeg = (lo..hi).filter { tone(it, set) }.minByOrNull { abs(it - endDeg) } ?: endDeg
+                }
                 val seq = IntArray(m)
                 if (twin != null) {
                     val src = twin.second
@@ -234,7 +241,8 @@ object Compose {
                     if (m >= 2) seq[m - 2] = (endDeg + (if (rnd.nextBoolean()) 1 else -1)).coerceIn(lo, hi)
                 } else {
                     // ponto de partida: perto do fim da linha anterior, em grau do acorde (1, 3, 5)
-                    val starts = (lo..hi).filter { Math.floorMod(it, 7) in intArrayOf(0, 2, 4) && abs(it - center) <= 4 }
+                    val startSet = chordPcs?.invoke(slots[startIdx].t)
+                    val starts = (lo..hi).filter { (if (startSet != null) tone(it, startSet) else Math.floorMod(it, 7) in intArrayOf(0, 2, 4)) && abs(it - center) <= 4 }.ifEmpty { (lo..hi).filter { abs(it - center) <= 4 } }
                     var pos = if (li == 0) starts.minByOrNull { abs(it - (center - 1)) + rnd.nextInt(3) } ?: center
                               else starts.minByOrNull { abs(it - prevEnd) + rnd.nextInt(2) } ?: prevEnd
                     val amp = 2 + rnd.nextInt(3)
@@ -253,7 +261,9 @@ object Compose {
                             if (np < lo || np > hi) continue
                             var sc = -abs(np - contour) * 1.0
                             sc -= when (abs(mv)) { 0 -> 0.9; 1 -> 0.0; 2 -> 0.35; 3 -> 1.3; else -> 2.0 }
-                            if (w >= 3f && Math.floorMod(np, 7) in intArrayOf(0, 2, 4)) sc += 1.0
+                            val cs = chordPcs?.invoke(slots[startIdx + k].t)
+                            if (cs != null) { if (tone(np, cs)) sc += (if (w >= 3f) 1.8 else if (w >= 2f) 1.2 else 0.4) else if (w >= 2f) sc -= 1.2 }
+                            else if (w >= 3f && Math.floorMod(np, 7) in intArrayOf(0, 2, 4)) sc += 1.0
                             if (abs(lastMove) >= 3 && mv != 0 && (mv > 0) == (lastMove > 0)) sc -= 1.5
                             if (mv == 0 && k >= 2 && seq[k - 2] == pos) sc -= 1.5
                             // penúltima: aproxima do alvo final por grau conjunto
@@ -310,7 +320,16 @@ object Compose {
         val key = TonalKey(st.fifths, st.minor)
         val rnd = Random(st.seed * 7919 + 17)
         val (slots, t0) = rhythm(lines, st, g)
-        val degs = melodyDegrees(lines, slots, st, g, key, rnd)
+        val prog = st.chords?.takeIf { it.isNotEmpty() }
+        val firstFull = if (t0 > 0) 1 else 0
+        val chordPcs: ((Int) -> Set<Int>?)? = if (prog == null) null else { t ->
+            val b = t / g.T
+            val lst = prog[(b - firstFull).coerceAtLeast(0) % prog.size]
+            val pos = t % g.T
+            val ats = Progression.positions(g, lst.size)
+            lst[ats.indexOfLast { it <= pos }.coerceAtLeast(0).coerceAtMost(lst.size - 1)].pcs().toSet()
+        }
+        val degs = melodyDegrees(lines, slots, st, g, key, rnd, chordPcs)
         val syls = lines.flatMap { it.syls }
         val last = slots.last()
         val endT = last.t + last.d
@@ -322,6 +341,7 @@ object Compose {
         // notas com altura (sensível do modo menor sobe quando resolve na tônica)
         val midis = IntArray(degs.size) { key.midi(degs[it]) }
         if (st.minor) for (k in 0 until degs.size - 1) if (Math.floorMod(degs[k], 7) == 6 && degs[k + 1] == degs[k] + 1) midis[k] += 1
+        if (st.minor && chordPcs != null) for (k in degs.indices) if (Math.floorMod(degs[k], 7) == 6) { val cs = chordPcs(slots[k].t); val pc = key.pcOf(degs[k]); if (cs != null && pc !in cs && (pc + 1) % 12 in cs) midis[k] = key.midi(degs[k]) + 1 }
         val nBars = totalTicks / g.T
         var si = 0
         for (b in 0 until nBars) {
@@ -343,7 +363,7 @@ object Compose {
             part.measures += me
         }
         // pickup: o primeiro compasso é parcial (já construído a partir de t0)
-        harmonize(s, part, slots, midis, lines, st, g, key, t0)
+        if (prog != null) Progression.apply(s, prog) else harmonize(s, part, slots, midis, lines, st, g, key, t0)
         return Result(s, g, key, if (t0 > 0) g.T - t0 else 0, emptyList())
     }
 

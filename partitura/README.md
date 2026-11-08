@@ -2,6 +2,13 @@
 
 Aplicativo de partituras para celular e tablet. Funciona offline.
 
+## Novidades da v0.6
+
+- **Ouvir** (nova aba): grave no microfone ou importe um áudio (WAV, MP3, M4A, OGG, FLAC) e o app monta uma partitura inicial: melodia, cifras e, se quiser, acompanhamento de piano. Tudo no aparelho, sem internet.
+- Motor: rede neural Basic Pitch (Spotify, Apache-2.0, 204 KB, em `app/src/main/assets/nmp.tflite`) via TensorFlow Lite. Se o modelo não carregar, entra o motor espectral próprio (`core/Dsp.kt`).
+- Criatividade: escolha o tom e digite a sequência de acordes antes de gerar; a melodia segue os acordes e dá para editar depois.
+- Limites honestos: testado em áudio sintético (notas isoladas F1 ≈ 0,93–0,97; vários sons juntos ≈ 0,70–0,80). Áudio real de microfone, ruído e muitos instrumentos juntos ainda não foram medidos e podem errar mais.
+
 ## Novidades da v0.5
 - **Criatividade** (aba nova): cole uma letra, escolha tonalidade (maior/menor), compasso (14 fórmulas), andamento e ritmo. O app separa as sílabas
   (português), distribui em tempos fortes/fracos, cria melodia com cadência por verso e escolhe os acordes; a letra sai embaixo das notas e as cifras em cima.

@@ -454,6 +454,107 @@ fun main() {
         Edit.setChord(ly, 0, 0, 0, Chords.parse("Am7"))
         check("Acorde digitado entra e sai no MusicXML", MusicXml.parse(MusicXml.write(ly).toByteArray()).parts[0].measures[0].harmony.firstOrNull()?.kind == "minor-seventh")
     }
+    run {
+        val letra = "Eu quero ver o sol brilhar\nno céu azul da minha vida\n\nO amor é uma canção\nque nasce no meu coração"
+        val pr = Progression.parse("A | E7 | A | E7 | A C♯m | D E7 | % | Bb7 xyz")
+        check("Sequência: 8 compassos lidos, '%' repete, lixo listado (${pr.bars.size} / ${pr.bad})", pr.bars.size == 8 && pr.bad == listOf("xyz") && pr.bars[4].size == 2 && pr.bars[6].map { it.text() } == pr.bars[5].map { it.text() })
+        check("Tom pelos acordes: A | E7 | A C♯m | D E7 → A maior; Am | Dm | E | Am → Lá menor; C Am F G → C maior; Em C D Em → Mi menor",
+            Progression.inferKey(Progression.parse("A | E7 | A C#m | D E7 | A").bars) == (3 to false) && Progression.inferKey(Progression.parse("Am | Dm | E | Am").bars) == (0 to true) &&
+            Progression.inferKey(Progression.parse("C | Am | F | G | C").bars) == (0 to false) && Progression.inferKey(Progression.parse("Em | C | D | Em").bars) == (1 to true))
+        var okAll = true; var why = ""; var tonesStrong = 0; var strong = 0
+        val progs = listOf("A | E7 | A | E7 | A C#m | D E7", "C | Am | F | G7", "Am | Dm | E7 | Am", "G | Em | C | D7 | G")
+        for (ps in progs) for ((b, t) in listOf(4 to 4, 3 to 4, 6 to 8, 2 to 4, 12 to 8, 5 to 4)) for (dens in 0..2) for (pk in listOf(true, false)) {
+            val bars = Progression.parse(ps).bars; val (f, mn) = Progression.inferKey(bars)
+            try {
+                val r = Compose.compose(letra, CreativeSettings(fifths = f, minor = mn, beats = b, beatType = t, density = dens, pickup = pk, chords = bars, seed = (dens + b).toLong()))
+                val sc = r.score
+                if (Validate.measureDurations(sc).isNotEmpty()) { okAll = false; why = "duração $ps $b/$t" }
+                val full = sc.parts[0].measures.filter { it.harmony.isNotEmpty() }
+                if (full.isEmpty() || full.indices.any { i -> full[i].harmony.map { it.text() } != bars[i % bars.size].map { it.text() } }) { okAll = false; why = "acordes mudaram $ps $b/$t: ${Progression.format(sc)}" }
+                // notas em tempo forte devem ser notas do acorde
+                val g = r.grid
+                for (m in sc.parts[0].measures) { var pos = 0; for (n in m.notes) { if (n.pitch != null && m.harmony.isNotEmpty() && pos % (g.T * g.tickDiv) == 0) { val h = m.harmony.filter { it.at <= pos }.maxByOrNull { it.at }; if (h != null) { strong++; if (Math.floorMod(n.pitch!!.midi, 12) in h.pcs()) tonesStrong++ } }; pos += n.duration } }
+                val lm = sc.parts[0].measures.last(); var lp = 0; var lastPos = 0; var lastN = 0
+                for (n in lm.notes) { if (n.pitch != null) { lastPos = lp; lastN = n.pitch!!.midi }; lp += n.duration }
+                val lh = lm.harmony.filter { it.at <= lastPos }.maxByOrNull { it.at } ?: lm.harmony.first()
+                if (Math.floorMod(lastN, 12) !in lh.pcs()) { okAll = false; why = "última nota fora do acorde $ps $b/$t d$dens" }
+                val rt = MusicXml.parse(MusicXml.write(sc).toByteArray()); if (Progression.format(rt) != Progression.format(sc)) { okAll = false; why = "ida e volta dos acordes" }
+                Arrange.addPiano(sc, "arpejo"); Arrange.addVoices(sc, "satb")
+            } catch (e: Throwable) { okAll = false; why = "exceção $ps $b/$t: $e" }
+        }
+        check("Melodia sobre acordes escolhidos: 4 sequências × 6 compassos × 3 densidades × anacruse: acordes exatos, válidos, última nota no acorde ($why)", okAll)
+        check("Melodia sobre acordes: ${tonesStrong}/${strong} notas do tempo 1 são notas do acorde (mín. 85%)", strong > 0 && tonesStrong * 100 >= strong * 85)
+        val sc2 = Compose.compose(letra, CreativeSettings(seed = 2)).score
+        Progression.apply(sc2, Progression.parse("F | C | Dm | Bb").bars)
+        check("Trocar acordes da música pronta mantém a melodia e repete a sequência", Progression.format(sc2).startsWith("F | C | Dm | B♭ | F | C") && Validate.measureDurations(sc2).isEmpty() && sc2.parts[0].measures.flatMap { it.notes }.count { it.lyric != null } == Lyrics.parse(letra).sumOf { it.syls.size })
+    }
+    run {
+        val kc = TonalKey(0, false); val ka = TonalKey(0, true); val kd = TonalKey(2, false)
+        check("Modelos de progressão: C: C G Am F; Am: Am F C G; D: D A Bm G",
+            Progression.presetText(kc, Progression.MAJOR_PRESETS[0]) == "C | G | Am | F" && Progression.presetText(ka, Progression.MINOR_PRESETS[0]) == "Am | F | C | G" && Progression.presetText(kd, Progression.MAJOR_PRESETS[0]) == "D | A | Bm | G")
+        check("Todo modelo, em todos os 13 tons, é lido sem erro (4 compassos)", (Progression.MAJOR_PRESETS.map { it to false } + Progression.MINOR_PRESETS.map { it to true }).all { (p, mn) -> (-6..6).all { f ->
+            val pr = Progression.parse(Progression.presetText(TonalKey(f, mn), p)); pr.bad.isEmpty() && pr.bars.size == 4 } })
+    }
+    run {
+        // verdade conhecida: melodia gerada -> eventos de áudio (com imprecisão humana) -> partitura -> comparar
+        val letra = "Eu quero ver o sol brilhar\nno céu azul da minha vida\n\nO amor é uma canção\nque nasce no meu coração"
+        val rnd = java.util.Random(7)
+        var okAll = true; var why = ""; var accSum = 0.0; var accN = 0
+        for ((fifths, minor) in listOf(0 to false, 2 to false, -3 to false, 0 to true, 1 to true)) for ((b, t) in listOf(4 to 4, 3 to 4, 6 to 8)) for (known in listOf(true, false)) {
+            val truth = Compose.compose(letra, CreativeSettings(fifths = fifths, minor = minor, beats = b, beatType = t, density = 1, pickup = false, tempo = 96, seed = (fifths + b + 3).toLong())).score
+            val truthNotes = truth.parts[0].measures.flatMap { it.notes }.filter { it.pitch != null }.map { it.pitch!!.midi }
+            val evs = Synth.events(truth, 96).filter { it.part == 0 }.map { e -> val j = rnd.nextGaussian() * 0.012; NoteEvent(e.startSec + j, e.startSec + e.durSec * 0.95 + j, e.midi, 0.6 + 0.4 * rnd.nextDouble()) }
+            try {
+                val r = ScoreFromNotes.build(evs, TranscribeOptions(tempo = if (known) 96.0 else null, beats = b, beatType = t, mode = 1))
+                if (Validate.measureDurations(r.score).isNotEmpty()) { okAll = false; why = "duração $fifths $minor $b/$t known=$known: ${Validate.measureDurations(r.score).take(2)}" }
+                val got = r.score.parts[0].measures.flatMap { it.notes }.filter { it.pitch != null }.map { it.pitch!!.midi }
+                // alturas: sequência igual (ligaduras não duplicam: contar só notas sem tieStop)
+                val gotNoTie = r.score.parts[0].measures.flatMap { it.notes }.filter { it.pitch != null && !it.tieStop }.map { it.pitch!!.midi }
+                val same = gotNoTie.zip(truthNotes).count { it.first == it.second }
+                accSum += same.toDouble() / truthNotes.size; accN++
+                if (gotNoTie.size != truthNotes.size) { okAll = false; why = "contagem ${gotNoTie.size} vs ${truthNotes.size} $fifths $minor $b/$t known=$known tempo=${r.tempo}" }
+                if (known && (r.fifths != fifths && !minor || r.minor != minor)) { why += " tom ${r.fifths}${if (r.minor) "m" else ""} vs $fifths${if (minor) "m" else ""}" }
+                MusicXml.parse(MusicXml.write(r.score).toByteArray()); Engrave.scene(r.score, 70f)
+            } catch (e: Throwable) { okAll = false; why = "exceção $fifths $minor $b/$t: $e" }
+        }
+        check("Notas → partitura: válida, mesmo número e sequência de notas da verdade, tempo conhecido ou estimado ($why)", okAll)
+        check("Notas → partitura: acerto médio das alturas ${(accSum / accN * 100).toInt()}% (mín. 97%)", accSum / accN >= 0.97)
+    }
+    run {
+        // Basic Pitch: janelamento, montagem e extração de notas (modelo simulado)
+        val sec = 20
+        val x = FloatArray(BasicPitch.SR * sec)
+        val ws = BasicPitch.windows(x)
+        check("BasicPitch: janelas de 43844 amostras (${ws.size})", ws.all { it.size == BasicPitch.NS } && ws.size == Math.ceil((x.size + BasicPitch.OVL / 2.0) / BasicPitch.STEP).toInt())
+        // posteriorgrama sintético: nota 60 de 20 a 80, nota 64 de 100 a 130 (quadros)
+        val nF = 400
+        val fr = Array(nF) { FloatArray(88) }; val on = Array(nF) { FloatArray(88) }
+        for (i in 20..80) fr[i][60 - 21] = 0.8f; on[20][60 - 21] = 0.9f
+        for (i in 100..130) fr[i][64 - 21] = 0.7f   // sem início marcado -> truque da melodia
+        for (i in 200..205) fr[i][67 - 21] = 0.9f; on[200][67 - 21] = 0.9f // curta demais
+        val ns = BasicPitch.notes(fr, on)
+        check("BasicPitch: 2 notas (60 com início, 64 sem início), curta descartada (${ns.map { it.midi }})", ns.size == 2 && ns[0].midi == 60 && ns[1].midi == 64 && Math.abs(ns[0].start - BasicPitch.frameTime(20)) < 1e-6)
+        val fake = BpRunner { _ -> BpWindow(Array(172) { FloatArray(88) }, Array(172) { FloatArray(88) }) }
+        val out = BasicPitch.transcribe(x, BasicPitch.SR, fake)
+        check("BasicPitch: áudio silencioso sem notas", out.isEmpty())
+    }
+    run {
+        // Motor espectral próprio: melodia de senos com harmônicos
+        val sr = 22050
+        val mel = listOf(60, 62, 64, 65, 67, 69, 71, 72, 71, 67, 64, 60)
+        val x = FloatArray((sr * 0.4 * mel.size).toInt() + sr / 2)
+        for ((k, m) in mel.withIndex()) {
+            val f = 440.0 * Math.pow(2.0, (m - 69) / 12.0); val a = (sr * 0.4 * k).toInt(); val n = (sr * 0.38).toInt()
+            for (i in 0 until n) { val env = Math.min(1.0, i / 300.0) * Math.exp(-i / (sr * 0.5)); var v = 0.0; for (h in 1..4) v += Math.sin(2 * Math.PI * f * h * i / sr) / h; x[a + i] += (0.3 * env * v).toFloat() }
+        }
+        val got = SpectralTranscriber().transcribe(x, sr)
+        var hit = 0
+        for ((k, m) in mel.withIndex()) if (got.any { it.midi == m && Math.abs(it.start - 0.4 * k) < 0.1 }) hit++
+        check("Motor espectral: $hit/${mel.size} notas da melodia sintética (mín. 10)", hit >= 10)
+        val wav = Synth.wavBytes(ShortArray(2205) { (Math.sin(it * 0.1) * 16000).toInt().toShort() })
+        val (back, srr) = Dsp.readWav(wav)
+        check("WAV: leitura de volta (${back.size} amostras, ${srr} Hz)", back.size == 2205 && srr == Synth.RATE)
+    }
     println(if (fails == 0) "TODOS OS TESTES PASSARAM" else "$fails FALHAS")
     kotlin.system.exitProcess(if (fails == 0) 0 else 1)
 }

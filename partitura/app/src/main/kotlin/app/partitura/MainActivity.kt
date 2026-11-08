@@ -75,9 +75,10 @@ private val AREAS = listOf(
     Area(5, "Arquivos", "Salvar e exportar", Ic.FOLDER, Mint),
     Area(6, "Servidor", "Ler PDF e foto", Ic.SERVER, Mint),   // escondido: só abre por Ajustes → Servidor privado
     Area(7, "Criatividade", "Letra vira música", Ic.STUDIO, Violet),
+    Area(8, "Ouvir", "Tocar vira partitura", Ic.PIANO, Violet),
 )
-private val SECTIONS = listOf("CRIAR" to listOf(0, 1, 7, 2), "APRENDER" to listOf(3, 4), "ARQUIVOS" to listOf(5))
-private val PHONE_TABS = listOf(0, 1, 7, 3, 99)
+private val SECTIONS = listOf("CRIAR" to listOf(0, 1, 8, 7, 2), "APRENDER" to listOf(3, 4), "ARQUIVOS" to listOf(5))
+private val PHONE_TABS = listOf(0, 1, 8, 7, 99)
 
 @Composable
 fun Root(state: AppState) {
@@ -100,6 +101,7 @@ fun Root(state: AppState) {
                 5 -> FilesScreen(state)
                 6 -> ServerScreen(state)
                 7 -> CreativeScreen(state)
+                8 -> ListenScreen(state)
                 else -> MoreScreen { tab = it }
             }
         }
@@ -116,7 +118,7 @@ fun Root(state: AppState) {
                     NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                         PHONE_TABS.forEach { i ->
                             val a = AREAS.getOrNull(i)
-                            val sel = if (i == 99) tab in listOf(2, 4, 5, 6) else tab == i
+                            val sel = if (i == 99) tab in listOf(3, 2, 4, 5, 6) else tab == i
                             val name = a?.name ?: "Mais"
                             NavigationBarItem(
                                 selected = sel, onClick = { tab = i },
@@ -151,7 +153,7 @@ fun Root(state: AppState) {
 private fun MoreScreen(go: (Int) -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Mais", style = MaterialTheme.typography.headlineMedium)
-        listOf(2, 4, 5).forEach { i ->
+        listOf(3, 2, 4, 5).forEach { i ->
             val a = AREAS[i]
             Row(
                 Modifier.fillMaxWidth().clip(MaterialTheme.shapes.large).background(MaterialTheme.colorScheme.surface).clickable { go(i) }.padding(14.dp),

@@ -6,7 +6,7 @@ plugins {
 android {
     namespace = "app.partitura"
     compileSdk = 35
-    defaultConfig { applicationId = "app.partitura"; minSdk = 26; targetSdk = 35; versionCode = 5; versionName = "0.5.0" }
+    defaultConfig { applicationId = "app.partitura"; minSdk = 26; targetSdk = 35; versionCode = 6; versionName = "0.6.0" }
     signingConfigs {
         getByName("debug") { storeFile = file("debug.keystore"); storePassword = "android"; keyAlias = "androiddebugkey"; keyPassword = "android" }
     }
@@ -22,4 +22,5 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
+    implementation("org.tensorflow:tensorflow-lite:2.14.0")
 }

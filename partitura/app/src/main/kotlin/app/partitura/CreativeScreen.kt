@@ -31,6 +31,9 @@ fun CreativeScreen(state: AppState) {
     var sevenths by rememberSaveable { mutableStateOf(false) }
     var pickup by rememberSaveable { mutableStateOf(true) }
     var seed by rememberSaveable { mutableIntStateOf(1) }
+    var chordText by rememberSaveable { mutableStateOf("") }
+    var keyAuto by rememberSaveable { mutableStateOf(true) }
+    var editText by remember { mutableStateOf("") }
     var piano by rememberSaveable { mutableStateOf("") }
     var voices by rememberSaveable { mutableStateOf("") }
     var voiceLyrics by rememberSaveable { mutableStateOf(true) }
@@ -41,12 +44,16 @@ fun CreativeScreen(state: AppState) {
     val meter = Conducting.METERS[meterIdx]
     val p = state.player
 
-    fun generate() {
+    val parsedChords = remember(chordText) { Progression.parse(chordText) }
+    val inferred = remember(parsedChords) { if (parsedChords.bars.isEmpty()) null else Progression.inferKey(parsedChords.bars) }
+    LaunchedEffect(inferred, keyAuto) { if (keyAuto && inferred != null) { fifths = inferred.first; minor = inferred.second } }
+
+    fun generate(chords: List<List<Harmony>>? = parsedChords.bars.takeIf { it.isNotEmpty() }) {
         error = null
         try {
             val r = Compose.compose(lyrics, CreativeSettings(title = title.ifBlank { "Minha música" }, fifths = fifths, minor = minor, beats = meter.first, beatType = meter.second,
-                tempo = tempo, seed = seed.toLong(), density = density, chordsPerBar = chordsPerBar, sevenths = sevenths, pickup = pickup))
-            base = r.score; ver++
+                tempo = tempo, seed = seed.toLong(), density = density, chordsPerBar = chordsPerBar, sevenths = sevenths, pickup = pickup, chords = chords))
+            base = r.score; ver++; editText = Progression.format(r.score)
         } catch (e: Exception) { error = e.message ?: "Não consegui montar essa letra."; base = null }
     }
 
@@ -70,11 +77,30 @@ fun CreativeScreen(state: AppState) {
             Text("1 · Letra e música", style = MaterialTheme.typography.titleMedium)
             OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Título") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(value = lyrics, onValueChange = { lyrics = it }, label = { Text("Letra (um verso por linha; linha em branco separa estrofes)") }, minLines = 5, maxLines = 12, modifier = Modifier.fillMaxWidth())
-            SectionTitle("Tonalidade: $tonic")
-            Stepper("Armadura (bemóis/sustenidos)", if (fifths > 0) "$fifths♯" else if (fifths < 0) "${-fifths}♭" else "0", { if (fifths > -7) fifths-- }, { if (fifths < 7) fifths++ })
+            SectionTitle("Tonalidade: $tonic" + if (keyAuto && inferred != null) " (pelos acordes)" else "")
             Wrap {
-                FilterChip(selected = !minor, onClick = { minor = false }, label = { Text("Maior") })
-                FilterChip(selected = minor, onClick = { minor = true }, label = { Text("Menor") })
+                FilterChip(selected = !minor, onClick = { minor = false; keyAuto = false }, label = { Text("Maior") })
+                FilterChip(selected = minor, onClick = { minor = true; keyAuto = false }, label = { Text("Menor") })
+            }
+            Wrap {
+                (-6..6).forEach { f ->
+                    FilterChip(selected = fifths == f, onClick = { fifths = f; keyAuto = false },
+                        label = { Text((if (minor) Names.minorKey(f) else Names.key(f)) + if (f > 0) " ${f}♯" else if (f < 0) " ${-f}♭" else "") })
+                }
+            }
+            if (inferred != null && !keyAuto) TextButton(onClick = { keyAuto = true }) { Text("Usar o tom dos acordes: ${if (inferred.second) Names.minorKey(inferred.first) + " menor" else Names.key(inferred.first) + " maior"}") }
+            SectionTitle("Sequência de acordes (opcional)")
+            OutlinedTextField(value = chordText, onValueChange = { chordText = it }, minLines = 2, maxLines = 5, modifier = Modifier.fillMaxWidth(),
+                label = { Text("Ex.: C | G | Am F | G7") },
+                supportingText = { Text(if (parsedChords.bad.isNotEmpty()) "Não entendi: ${parsedChords.bad.joinToString(", ")}" else "Um compasso entre barras |. Dois acordes no compasso: separe por espaço. A sequência se repete até o fim da letra e a melodia segue esses acordes. Vazio = o app escolhe.") },
+                isError = parsedChords.bad.isNotEmpty())
+            Text("Modelos neste tom:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Wrap {
+                val k = TonalKey(fifths, minor)
+                (if (minor) Progression.MINOR_PRESETS else Progression.MAJOR_PRESETS).forEach { pr ->
+                    OutlinedButton(onClick = { chordText = Progression.presetText(k, pr) }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text(pr.label) }
+                }
+                if (chordText.isNotEmpty()) TextButton(onClick = { chordText = "" }) { Text("Limpar") }
             }
             SectionTitle("Compasso: ${meter.first}/${meter.second}")
             Wrap { Conducting.METERS.forEachIndexed { i, m -> FilterChip(selected = meterIdx == i, onClick = { meterIdx = i }, label = { Text("${m.first}/${m.second}") }) } }
@@ -120,10 +146,19 @@ fun CreativeScreen(state: AppState) {
             Panel {
                 Text("3 · Acordes", style = MaterialTheme.typography.titleMedium)
                 Text("Toque num acorde para trocar a fundamental ou o tipo, ou para apagá-lo. O acompanhamento se refaz sozinho.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Wrap {
+                if (parsedChords.bars.isEmpty()) Wrap {
                     FilterChip(selected = chordsPerBar == 1, onClick = { chordsPerBar = 1; generate() }, label = { Text("1 acorde por compasso") })
                     FilterChip(selected = chordsPerBar == 2, onClick = { chordsPerBar = 2; generate() }, label = { Text("2 por compasso") })
                     FilterChip(selected = sevenths, onClick = { sevenths = !sevenths; generate() }, label = { Text("Com sétimas") })
+                }
+                OutlinedTextField(value = editText, onValueChange = { editText = it }, minLines = 2, maxLines = 6, modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Sequência de acordes (edite aqui)") }, isError = Progression.parse(editText).bad.isNotEmpty(),
+                    supportingText = { val pe = Progression.parse(editText); Text(if (pe.bad.isNotEmpty()) "Não entendi: ${pe.bad.joinToString(", ")}" else "${pe.bars.size} compassos escritos; se a música tiver mais, a sequência se repete.") })
+                Wrap {
+                    Button(onClick = { val pe = Progression.parse(editText); if (pe.bars.isNotEmpty() && pe.bad.isEmpty()) { val b = base!!.copyDeep(); Progression.apply(b, pe.bars); base = b; ver++ } },
+                        enabled = Progression.parse(editText).let { it.bars.isNotEmpty() && it.bad.isEmpty() }) { Text("Aplicar acordes") }
+                    OutlinedButton(onClick = { val pe = Progression.parse(editText); if (pe.bars.isNotEmpty() && pe.bad.isEmpty()) { chordText = editText; generate(pe.bars) } },
+                        enabled = Progression.parse(editText).let { it.bars.isNotEmpty() && it.bad.isEmpty() }) { Text("Refazer a melodia sobre estes acordes") }
                 }
                 Wrap {
                     sc.parts[0].measures.forEachIndexed { mi, m ->
@@ -168,10 +203,10 @@ fun CreativeScreen(state: AppState) {
                     }
                 }
             },
-            confirmButton = { Button(onClick = { val b = base!!.copyDeep(); Edit.setChord(b, 0, bar, at, h); base = b; ver++; chordEdit = null }) { Text("Aplicar") } },
+            confirmButton = { Button(onClick = { val b = base!!.copyDeep(); Edit.setChord(b, 0, bar, at, h); base = b; ver++; editText = Progression.format(b); chordEdit = null }) { Text("Aplicar") } },
             dismissButton = {
                 Row {
-                    TextButton(onClick = { val b = base!!.copyDeep(); Edit.setChord(b, 0, bar, at, null); base = b; ver++; chordEdit = null }) { Text("Apagar") }
+                    TextButton(onClick = { val b = base!!.copyDeep(); Edit.setChord(b, 0, bar, at, null); base = b; ver++; editText = Progression.format(b); chordEdit = null }) { Text("Apagar") }
                     TextButton(onClick = { chordEdit = null }) { Text("Cancelar") }
                 }
             },
