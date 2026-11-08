@@ -75,6 +75,52 @@ fun main() {
     val mt = Synth.measureTimes(ode, 60); check("Tempos dos compassos a 60 bpm: 4 s por compasso", mt.size == 9 && mt[1] == 4.0 && mt[8] == 32.0)
     val part1 = Synth.render(ode, 120, fromSec = mt[1] / 2, toSec = mt[2] / 2)
     check("Tocar só compasso 2 gera trecho curto", part1.size < Synth.render(ode, 120).size / 3)
+    val px = MusicXml.parseAny(PIANO_XML.toByteArray())
+    check("Piano: DOCTYPE+BOM lidos, título", px.title == "Peça de Piano" && px.fifths == -1 && px.beats == 3 && px.tempo == 96)
+    check("Piano: duas pautas Sol e Fá no mesmo grupo", px.parts.size == 2 && px.parts[0].clef == 'G' && px.parts[1].clef == 'F' && px.parts[0].group == px.parts[1].group)
+    check("Piano: notas por pauta", px.parts[0].measures[0].notes.size == 2 && px.parts[1].measures[0].notes.size == 1 && px.parts[0].measures[1].notes.size == 3)
+    check("Piano: ligadura e acorde", px.parts[0].measures[0].notes[1].tieStart && px.parts[0].measures[1].notes[0].tieStop && px.parts[0].measures[1].notes[2].chord)
+    check("Piano: duração em compasso válida", Validate.measureDurations(px).isEmpty())
+    val pev = Synth.events(px); check("Piano: ligadura soma duração (A4 = 6 divisões)", pev.any { it.midi == 69 && Math.abs(it.durSec - 3 * 60.0 / 96) < 1e-6 })
+    check("Piano: xml volta com 2 pautas", MusicXml.parse(MusicXml.write(px).toByteArray()).parts.size == 2)
+    check("UTF-16 com BOM", MusicXml.parseAny(byteArrayOf(0xFF.toByte(), 0xFE.toByte()) + MusicXml.write(eb).replace("UTF-8", "UTF-16").toByteArray(Charsets.UTF_16LE)).parts.size == 1)
+    check("Transpor mantém clave de Fá e grupo", Transpose.bySemitones(px, 2).let { it.parts[1].clef == 'F' && it.parts[1].group == px.parts[1].group })
+    val t0 = System.nanoTime(); val longS = Samples.ode().copyDeep(); repeat(7) { longS.parts[0].measures += longS.parts[0].measures.take(8).map { m -> Measure(m.number, m.notes.toMutableList()) }; longS.parts[1].measures += longS.parts[1].measures.take(8).map { m -> Measure(m.number, m.notes.toMutableList()) } }
+    val big = Synth.render(longS, 100); val ms = (System.nanoTime() - t0) / 1_000_000
+    check("Síntese de 64 compassos em ${ms} ms (< 4000)", ms < 4000 && big.size > 44100 * 60)
+    check("Áudio não é silêncio nem estoura", big.maxOf { kotlin.math.abs(it.toInt()) } in 3000..32767)
+    for (sc in Samples.all() + listOf(px)) {
+        val scene = Engrave.scene(sc, 70f)
+        check("Pauta '${sc.title}': ${scene.systems.size} sistemas, ${scene.notes.size} notas", scene.systems.isNotEmpty() && scene.notes.count { it.midi >= 0 } == sc.parts.sumOf { p -> p.measures.sumOf { m -> m.notes.count { it.pitch != null } } })
+        val xs = (0 until 40).mapNotNull { scene.cursor(it * scene.totalQ / 40) }
+        check("Cursor avança sem recuar em '${sc.title}'", xs.zipWithNext().all { (a, b) -> b.first > a.first || (b.first == a.first && b.second >= a.second - 0.01f) })
+    }
+    check("Cursor fora da música = null", Engrave.scene(Samples.ode(), 70f).cursor(1e6) == null)
+    check("Valor rítmico: 1.5 = semínima pontuada", Engrave.valueOf(1.5).let { it.level == 2 && it.dots == 1 } && Engrave.valueOf(4.0).level == 0)
+    val blank2 = Edit.blank("b", 0, 4, 4, 2)
+    Edit.setDurationSmart(blank2, 0, 0, 0, 1.0)
+    check("Duração menor preenche com pausas (1 + 3 tempos)", blank2.parts[0].measures[0].notes.map { it.duration } == listOf(4, 12) && Validate.measureDurations(blank2).isEmpty())
+    Edit.setPitchAtStaffPos(blank2, 0, 0, 0, 0)
+    check("Pauta: posição 0 na clave de Sol = Mi4", blank2.parts[0].measures[0].notes[0].pitch == Pitch('E', 0, 4))
+    Edit.setDurationSmart(blank2, 0, 0, 0, 2.0)
+    check("Duração maior consome pausa (2 + 2)", blank2.parts[0].measures[0].notes.map { it.duration } == listOf(8, 8) && Validate.measureDurations(blank2).isEmpty())
+    Edit.setDurationSmart(blank2, 0, 0, 0, 4.0)
+    check("Duração maior até o compasso todo", blank2.parts[0].measures[0].notes.map { it.duration } == listOf(16))
+    val fscore = Edit.blank("f", -3, 4, 4, 1).also { it.parts[0].clef = 'F' }; Edit.setPitchAtStaffPos(fscore, 0, 0, 0, 2)
+    check("Clave de Fá, armadura de Mib: posição 2 = Si♭2", fscore.parts[0].measures[0].notes[0].pitch == Pitch('B', -1, 2))
+    val trp = Transpose.bySemitones(Samples.ode(), 2).also { }
+    check("Transposição mantém Fá do acompanhamento", trp.parts[1].clef == 'F' && trp.fifths == 2)
+    val hitScene = Engrave.scene(Samples.ode(), 70f)
+    val g0 = hitScene.items.filterIsInstance<Glyph>().first { it.note >= 0 }
+    check("Toque numa nota seleciona a nota", SceneHit.nearest(hitScene, g0.x + 0.6f, g0.y) == g0.note && SceneHit.nearest(hitScene, 500f, 500f) == null)
+    check("Toque na pauta devolve parte e posição", SceneHit.staffAt(hitScene, 5f, hitScene.systems[0].staffTops[0] + 4f)?.let { it.first == 0 && it.second == 0 } == true)
+    run {
+        val sy = hitScene.systems[0]
+        val first0 = hitScene.items.filterIsInstance<Glyph>().first { it.note >= 0 && hitScene.notes[it.note].part == 0 }
+        val first1 = hitScene.items.filterIsInstance<Glyph>().first { it.note >= 0 && hitScene.notes[it.note].part == 1 }
+        check("Toque acima da pauta 1 acha a nota da parte 0", SceneHit.nearestInPart(hitScene, first0.x + 0.7f, sy.staffTops[0] - 1f, 0) == first0.note)
+        check("Mesmo x na parte 1 acha a nota do baixo", SceneHit.nearestInPart(hitScene, first1.x + 0.7f, sy.staffTops[1] + 2f, 1) == first1.note)
+    }
     println(if (fails == 0) "TODOS OS TESTES PASSARAM" else "$fails FALHAS")
     kotlin.system.exitProcess(if (fails == 0) 0 else 1)
 }

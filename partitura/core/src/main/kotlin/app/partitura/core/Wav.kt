@@ -58,23 +58,45 @@ object Synth {
     }
 
     fun render(s: Score, tempo: Int = s.tempo, volumes: List<Double> = emptyList(), fromSec: Double = 0.0, toSec: Double = Double.MAX_VALUE): ShortArray {
-        val all = events(s, tempo).filter { it.startSec + it.durSec > fromSec && it.startSec < toSec }
+        val all = events(s, tempo).filter { it.startSec >= fromSec - 1e-6 && it.startSec < toSec }
         val end = (all.maxOfOrNull { minOf(it.startSec + it.durSec, toSec) } ?: fromSec) + 1.0
         val buf = DoubleArray(((end - fromSec) * RATE).toInt())
         for (e in all) {
             val f0 = 440.0 * 2.0.pow((e.midi - 69) / 12.0)
             val vol = volumes.getOrElse(e.part) { 1.0 } * 0.22
             val s0 = ((e.startSec - fromSec) * RATE).toInt().coerceAtLeast(0)
-            val len = ((e.durSec + 0.6) * RATE).toInt()
+            val len = ((e.durSec + 0.5) * RATE).toInt()
+            val relStart = ((e.durSec) * RATE).toInt()
+            // Osciladores por recorrência (rotação de fasor): muito mais rápido que sin/exp por amostra.
+            val nh = minOf(6, (9000.0 / f0).toInt().coerceAtLeast(1))
+            val cr = DoubleArray(nh); val ci = DoubleArray(nh); val re = DoubleArray(nh); val im = DoubleArray(nh)
+            val am = DoubleArray(nh); val dc = DoubleArray(nh)
+            val base = 1.2 + f0 / 900.0
+            for (h in 0 until nh) {
+                val w = 2 * PI * f0 * (h + 1) / RATE
+                cr[h] = kotlin.math.cos(w); ci[h] = kotlin.math.sin(w); re[h] = 1.0; im[h] = 0.0
+                am[h] = 1.0 / (h + 1).toDouble().pow(1.3)
+                dc[h] = exp(-(h * 1.5) / RATE)
+            }
+            val slow = exp(-base * 0.45 / RATE); val fast = exp(-base * 2.2 / RATE)
+            var eS = 0.65; var eF = 0.35
+            val relMul = exp(-14.0 / RATE)
+            var rel = 1.0
+            val atkLen = (0.004 * RATE).toInt()
             for (i in 0 until len) {
                 val idx = s0 + i; if (idx >= buf.size) break
-                val t = i.toDouble() / RATE
-                val decay = exp(-t * (1.2 + f0 / 900.0))
-                val rel = if (t > e.durSec) exp(-(t - e.durSec) * 14.0) else 1.0
-                val atk = minOf(1.0, t / 0.004)
                 var v = 0.0
-                for (h in 1..6) { if (f0 * h > 9000) break; v += sin(2 * PI * f0 * h * t) * (1.0 / h.toDouble().pow(1.3)) * exp(-t * (h - 1) * 1.5) }
-                buf[idx] += v * decay * rel * atk * vol
+                for (h in 0 until nh) {
+                    v += im[h] * am[h]
+                    val nr = re[h] * cr[h] - im[h] * ci[h]; val ni = re[h] * ci[h] + im[h] * cr[h]
+                    re[h] = nr; im[h] = ni
+                    am[h] *= dc[h]
+                }
+                eS *= slow; eF *= fast
+                if (i >= relStart) rel *= relMul
+                val atk = if (i < atkLen) i.toDouble() / atkLen else 1.0
+                buf[idx] += v * (eS + eF) * rel * atk * vol
+                if (i % 4096 == 4095) for (h in 0 until nh) { val m = kotlin.math.sqrt(re[h] * re[h] + im[h] * im[h]); re[h] /= m; im[h] /= m }
             }
         }
         val peak = buf.maxOfOrNull { kotlin.math.abs(it) } ?: 1.0

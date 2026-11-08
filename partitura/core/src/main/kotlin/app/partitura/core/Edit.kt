@@ -37,6 +37,45 @@ object Edit {
         put(s, p, m, n, nt.copy(duration = (quarters * s.divisions).roundToInt().coerceAtLeast(1)))
     }
 
+    private val STD = listOf(16, 12, 8, 6, 4, 3, 2, 1) // em 1/4 de semínima (divisions = 4): 4, 3, 2, 1.5, 1, 0.75, 0.5, 0.25
+
+    /** Troca a duração e preenche/consome pausas vizinhas para manter o compasso completo. Devolve a duração aplicada (em divisões). */
+    fun setDurationSmart(s: Score, p: Int, m: Int, n: Int, quarters: Double): Int {
+        val list = s.parts.getOrNull(p)?.measures?.getOrNull(m)?.notes ?: return 0
+        val nt = list.getOrNull(n) ?: return 0
+        val want = (quarters * s.divisions).roundToInt().coerceAtLeast(1)
+        val old = nt.duration
+        if (want == old) return old
+        if (want < old) {
+            list[n] = nt.copy(duration = want, tieStart = false)
+            var rest = old - want; var at = n + 1
+            val unit = s.divisions / 4
+            while (rest > 0) {
+                val piece = STD.map { it * unit }.firstOrNull { it <= rest } ?: rest
+                list.add(at++, Note(null, piece, nt.voice)); rest -= piece
+            }
+            return want
+        }
+        var have = old; var i = n + 1
+        while (have < want && i < list.size && list[i].pitch == null && list[i].voice == nt.voice && !list[i].chord) {
+            val r = list[i]
+            if (have + r.duration <= want) { have += r.duration; list.removeAt(i) }
+            else { list[i] = r.copy(duration = r.duration - (want - have)); have = want }
+        }
+        list[n] = nt.copy(duration = have)
+        return have
+    }
+
+    /** Define a altura pela posição na pauta (meios-espaços desde a linha de baixo), respeitando a armadura. */
+    fun setPitchAtStaffPos(s: Score, p: Int, m: Int, n: Int, pos: Int) {
+        val nt = note(s, p, m, n) ?: return
+        val idx = pos + (if (s.parts[p].clef == 'F') 2 * 7 + 4 else 4 * 7 + 2)
+        val step = Pitch.STEPS[Math.floorMod(idx, 7)]
+        val oct = Math.floorDiv(idx, 7)
+        if (oct < 0 || oct > 8) return
+        put(s, p, m, n, nt.copy(pitch = Pitch(step, Spell.keyAlter(s.fifths, step), oct)))
+    }
+
     fun toggleDot(s: Score, p: Int, m: Int, n: Int) {
         val nt = note(s, p, m, n) ?: return
         val d = nt.duration

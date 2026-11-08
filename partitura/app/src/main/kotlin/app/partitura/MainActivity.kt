@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
@@ -30,31 +31,32 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Fonts.init(assets)
         state.openPicker = { opener.launch(arrayOf("*/*")) }
         state.saveAs = { name, bytes -> pending = bytes; saver.launch(name) }
         setContent { PartituraTheme(state.dark) { Surface(color = MaterialTheme.colorScheme.background) { Root(state) } } }
     }
 
-    override fun onDestroy() { state.player.stop(); super.onDestroy() }
+    override fun onDestroy() { state.player.release(); super.onDestroy() }
 }
 
-private val AREAS = listOf("Início" to "⌂", "Editor" to "✎", "Reprodução" to "▶", "Transposição" to "⇅", "Teoria" to "♯", "Arquivos" to "≡")
+private val AREAS = listOf("Início" to Ic.HOME, "Estúdio" to Ic.STUDIO, "Transpor" to Ic.SWAP, "Teoria" to Ic.THEORY, "Arquivos" to Ic.FOLDER)
 
 @Composable
 fun Root(state: AppState) {
     var tab by rememberSaveable { mutableStateOf(0) }
     val snack = remember { SnackbarHostState() }
+    state.goStudio = { tab = 1 }
     LaunchedEffect(state.message) { state.message?.let { snack.showSnackbar(it); state.message = null } }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 720.dp
         val content: @Composable () -> Unit = {
             when (tab) {
-                0 -> HomeScreen(state) { tab = 1 }
-                1 -> EditorScreen(state, wide) { tab = 0 }
-                2 -> PlaybackScreen(state) { tab = 0 }
-                3 -> TransposeScreen(state) { tab = 0 }
-                4 -> TheoryScreen(state) { tab = 1 }
-                else -> FilesScreen(state) { tab = 0 }
+                0 -> HomeScreen(state)
+                1 -> StudioScreen(state, wide) { tab = 0 }
+                2 -> TransposeScreen(state)
+                3 -> TheoryScreen(state, wide)
+                else -> FilesScreen(state)
             }
         }
         if (wide) {
@@ -62,7 +64,7 @@ fun Root(state: AppState) {
                 NavigationRail(containerColor = MaterialTheme.colorScheme.surface) {
                     Spacer(Modifier.height(12.dp))
                     AREAS.forEachIndexed { i, (n, ic) ->
-                        NavigationRailItem(selected = tab == i, onClick = { tab = i }, icon = { Text(ic, style = MaterialTheme.typography.titleLarge) }, label = { Text(n) })
+                        NavigationRailItem(selected = tab == i, onClick = { tab = i }, icon = { Icon24(ic, MaterialTheme.colorScheme.onSurface) }, label = { Text(n) })
                     }
                 }
                 Scaffold(modifier = Modifier.weight(1f), snackbarHost = { SnackbarHost(snack) }, containerColor = MaterialTheme.colorScheme.background) { pad -> Box(Modifier.padding(pad).fillMaxSize()) { content() } }
@@ -72,10 +74,27 @@ fun Root(state: AppState) {
                 snackbarHost = { SnackbarHost(snack) }, containerColor = MaterialTheme.colorScheme.background,
                 bottomBar = {
                     NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                        AREAS.forEachIndexed { i, (n, ic) -> NavigationBarItem(selected = tab == i, onClick = { tab = i }, icon = { Text(ic) }, label = { Text(n, maxLines = 1, style = MaterialTheme.typography.labelSmall) }) }
+                        AREAS.forEachIndexed { i, (n, ic) ->
+                            NavigationBarItem(selected = tab == i, onClick = { tab = i }, icon = { Icon24(ic, MaterialTheme.colorScheme.onSurface) }, label = { Text(n, maxLines = 1, style = MaterialTheme.typography.labelSmall) })
+                        }
                     }
                 },
             ) { pad -> Box(Modifier.padding(pad).fillMaxSize()) { content() } }
         }
+    }
+    if (state.importing) {
+        AlertDialog(
+            onDismissRequest = {}, confirmButton = {},
+            title = { Text("Lendo a partitura…") },
+            text = { Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { CircularProgressIndicator(); Spacer(Modifier.height(12.dp)); Text("O servidor está reconhecendo as notas. Pode levar um minuto.") } },
+        )
+    }
+    if (state.needOmr) {
+        AlertDialog(
+            onDismissRequest = { state.needOmr = false },
+            title = { Text("Ler PDF e foto") },
+            text = { Text("Reconhecer notas em PDF ou foto exige um servidor de leitura óptica de música (OMR), que o app ainda não tem configurado. Em Início → Ajustes (engrenagem) você informa o endereço; a pasta omr-server do projeto traz o servidor pronto. Enquanto isso, abra arquivos MusicXML.") },
+            confirmButton = { Button(onClick = { state.needOmr = false; tab = 0 }) { Text("Entendi") } },
+        )
     }
 }

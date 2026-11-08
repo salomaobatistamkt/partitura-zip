@@ -16,7 +16,7 @@ data class Note(val pitch: Pitch?, val duration: Int, val voice: Int = 1, val ch
 
 data class Measure(val number: Int, val notes: MutableList<Note> = mutableListOf())
 
-data class Part(val id: String, val name: String, val measures: MutableList<Measure> = mutableListOf(), var clef: Char = 'G')
+data class Part(val id: String, val name: String, val measures: MutableList<Measure> = mutableListOf(), var clef: Char = 'G', val group: String = id)
 
 data class Score(
     val title: String,
@@ -29,5 +29,5 @@ data class Score(
 )
 
 fun Score.copyDeep(): Score = copy(parts = parts.map { p ->
-    Part(p.id, p.name, p.measures.map { m -> Measure(m.number, m.notes.toMutableList()) }.toMutableList(), p.clef)
+    Part(p.id, p.name, p.measures.map { m -> Measure(m.number, m.notes.toMutableList()) }.toMutableList(), p.clef, p.group)
 }.toMutableList())
