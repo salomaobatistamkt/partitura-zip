@@ -88,6 +88,11 @@ object MusicXml {
         }?.toMap() ?: emptyMap()
         val title = root.kid("work")?.text("work-title")?.takeIf { it.isNotBlank() } ?: root.text("movement-title")?.takeIf { it.isNotBlank() } ?: "Sem título"
         val score = Score(title, 1, 0, 4, 4, 100)
+        run {
+            val cs = root.kids("credit").mapNotNull { c -> c.kid("credit-words")?.let { w -> val t = (w.textContent ?: "").trim(); if (t.isBlank() || t == title) null else Triple(t, w.getAttribute("justify"), w.getAttribute("default-y").toDoubleOrNull() ?: 0.0) } }
+            val ys = cs.map { it.third }.distinct().sortedDescending()
+            score.credits = cs.map { Credit(it.first, when (it.second) { "left" -> 'L'; "right" -> 'R'; else -> 'C' }, ys.indexOf(it.third)) }.take(8)
+        }
         var gotKey = false; var gotTime = false; var gotTempo = false; var gotDiv = false
         val DYN_MARKS = setOf("pppp", "ppp", "pp", "p", "mp", "mf", "f", "ff", "fff", "ffff", "sf", "sfz", "fp", "rfz", "sffz", "fz")
         for (p in root.kids("part")) {
@@ -247,7 +252,9 @@ object MusicXml {
         val groups = ArrayList<MutableList<Part>>()
         for (p in s.parts) { val g = groups.firstOrNull { it[0].group == p.group }; if (g != null) g += p else groups += mutableListOf(p) }
         val sb = StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<score-partwise version=\"4.0\">\n")
-        sb.append("  <work><work-title>${esc(s.title)}</work-title></work>\n  <part-list>\n")
+        sb.append("  <work><work-title>${esc(s.title)}</work-title></work>\n")
+        for (c in s.credits) sb.append("  <credit page=\"1\"><credit-words justify=\"${when (c.align) { 'L' -> "left"; 'R' -> "right"; else -> "center" }}\" default-y=\"${1000 - c.row * 40}\">${esc(c.text)}</credit-words></credit>\n")
+        sb.append("  <part-list>\n")
         for (g in groups) {
             val name = if (g.size > 1) g[0].name.substringBefore(" (pauta").trim() else g[0].name
             val pid = if (g.size > 1) g[0].group else g[0].id

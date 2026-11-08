@@ -66,7 +66,7 @@ fun FilesScreen(state: AppState) {
 
 fun renderPng(s: Score): ByteArray {
     val widthSp = 100f; val sp = 10f
-    val sc = Engrave.scene(s, widthSp)
+    val sc = Engrave.scene(s, widthSp, true)
     val h = (sc.height * sp).toInt() + 20
     val bmp = Bitmap.createBitmap((widthSp * sp).toInt(), h.coerceAtMost(14000), Bitmap.Config.ARGB_8888)
     val c = Canvas(bmp); c.drawColor(AColor.WHITE)
@@ -79,7 +79,7 @@ fun renderPdf(s: Score): ByteArray {
     val pw = 595; val ph = 842; val margin = 40f
     val widthSp = 78f
     val sp = (pw - 2 * margin) / widthSp
-    val sc = Engrave.scene(s, widthSp)
+    val sc = Engrave.scene(s, widthSp, true)
     val availSp = (ph - 2 * margin) / sp
     val doc = PdfDocument()
     // agrupa sistemas em páginas

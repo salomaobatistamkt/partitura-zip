@@ -120,12 +120,12 @@ object Playlist {
         }
     }
 
-    /** Monta a linha do tempo. [tempo] é o andamento escolhido para tocar; os andamentos escritos na partitura são escalados por ele. */
-    fun timeline(s: Score, tempo: Int = s.tempo, expand: Boolean = true, plain: Boolean = false): Timeline {
+    /** Duração de cada compasso (divisões): a maior entre as pautas; compasso sem notas vale o compasso cheio. A tela e o som usam a mesma conta. */
+    fun measureLens(s: Score): IntArray {
         val n = measureCount(s)
         val div = s.divisions.coerceAtLeast(1)
         val bar = div * 4 * s.beats / s.beatType
-        val len = IntArray(n) { mi ->
+        return IntArray(n) { mi ->
             var mx = 0
             for (p in s.parts) {
                 val m = p.measures.getOrNull(mi) ?: continue
@@ -134,6 +134,13 @@ object Playlist {
             }
             if (mx <= 0) bar else mx
         }
+    }
+
+    /** Monta a linha do tempo. [tempo] é o andamento escolhido para tocar; os andamentos escritos na partitura são escalados por ele. */
+    fun timeline(s: Score, tempo: Int = s.tempo, expand: Boolean = true, plain: Boolean = false): Timeline {
+        val n = measureCount(s)
+        val div = s.divisions.coerceAtLeast(1)
+        val len = measureLens(s)
         val order = order(s, expand && !plain)
         val ratio = if (plain) 1.0 else tempo.toDouble() / s.tempo.coerceAtLeast(1)
         val played = ArrayList<Played>()

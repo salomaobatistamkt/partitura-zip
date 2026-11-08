@@ -50,7 +50,24 @@ class Scene(val items: List<Item>, val width: Float, val height: Float, val note
         }
         return null
     }
-    fun soundingAt(q: Double): List<Int> = notes.indices.filter { notes[it].midi >= 0 && notes[it].startQ <= q + 1e-9 && q < notes[it].endQ - 1e-9 }
+    // índice por começo: a consulta olha só as notas perto de q (antes varria todas a cada quadro e fazia o aparelho engasgar)
+    private val byStart: IntArray by lazy { notes.indices.filter { notes[it].midi >= 0 }.sortedBy { notes[it].startQ }.toIntArray() }
+    private val maxLen: Double by lazy { byStart.maxOfOrNull { notes[it].endQ - notes[it].startQ } ?: 0.0 }
+    fun soundingAt(q: Double): List<Int> {
+        val a = byStart
+        var lo = 0; var hi = a.size
+        while (lo < hi) { val mid = (lo + hi) ushr 1; if (notes[a[mid]].startQ <= q + 1e-9) lo = mid + 1 else hi = mid }
+        val out = ArrayList<Int>(8)
+        var i = lo - 1
+        val limit = q - maxLen - 1e-6
+        while (i >= 0) {
+            val n = notes[a[i]]
+            if (n.startQ < limit) break
+            if (q < n.endQ - 1e-9) out += a[i]
+            i--
+        }
+        return out
+    }
     val totalQ: Double get() = notes.maxOfOrNull { it.endQ } ?: 0.0
 }
 
@@ -122,7 +139,7 @@ object Engrave {
 
     private class Hair(val sys: Int, val m: Int, val x: Float, val part: Int, val cresc: Boolean) { var sys2 = -1; var x2 = 0f }
 
-    fun build(s: Score, widthSp: Float): Scene {
+    fun build(s: Score, widthSp: Float, header: Boolean = false): Scene {
         val items = ArrayList<Item>()
         val snotes = ArrayList<SNote>()
         val div = s.divisions.toDouble()
@@ -130,16 +147,9 @@ object Engrave {
         // eventos por parte/compasso
         val evs = s.parts.map { p -> List(nMeasures) { mi -> p.measures.getOrNull(mi)?.let { events(it) } ?: emptyList() } }
         // início de cada compasso em semínimas (por parte, como no sintetizador)
-        val measStartQ = Array(s.parts.size) { DoubleArray(nMeasures + 1) }
-        s.parts.forEachIndexed { pi, p ->
-            var t = 0
-            for (mi in 0 until nMeasures) {
-                measStartQ[pi][mi] = t / div
-                val mm = p.measures.getOrNull(mi)
-                t += mm?.notes?.filter { !it.chord }?.groupBy { it.voice }?.values?.maxOfOrNull { l -> l.sumOf { it.duration } } ?: 0
-            }
-            measStartQ[pi][nMeasures] = t / div
-        }
+        val lensAll = Playlist.measureLens(s)
+        val common = DoubleArray(nMeasures + 1).also { var t = 0; for (mi in 0 until nMeasures) { it[mi] = t / div; t += lensAll[mi] }; it[nMeasures] = t / div }
+        val measStartQ = Array(s.parts.size) { common }
         val colQ = DoubleArray(nMeasures + 1) { i -> measStartQ[0][i] }
         // armadura, fórmula de compasso e clave em vigor em cada compasso (mudam no meio da peça)
         val keyAt = IntArray(nMeasures); val beatsAt = IntArray(nMeasures); val btAt = IntArray(nMeasures)
@@ -209,11 +219,52 @@ object Engrave {
             if (g != null) g += pi else groups += mutableListOf(pi)
         }
         val staffGap = 9.5f // entre pautas da mesma chave
+        // extensão das notas (e hastes) abaixo/acima da pauta, por parte e compasso, em sp; define onde vão letra e dinâmicas
+        val downExt = Array(s.parts.size) { FloatArray(nMeasures) }
+        val upExt = Array(s.parts.size) { FloatArray(nMeasures) }
+        val hasLy = Array(s.parts.size) { BooleanArray(nMeasures) }
+        val hasDyn = Array(s.parts.size) { BooleanArray(nMeasures) }
+        for (pi in s.parts.indices) for (mi2 in 0 until nMeasures) {
+            val mm = s.parts[pi].measures.getOrNull(mi2) ?: continue
+            val clef = clefAt[pi][mi2]
+            val multi = mm.notes.map { it.voice }.distinct().size > 1
+            var dn = 0f; var upv = 0f
+            for (n in mm.notes) {
+                val pt = n.pitch ?: continue
+                val pos = Layout.staffPos(clef, pt.step, pt.octave)
+                val stemDown = if (multi) n.voice != 1 else pos >= 4
+                val yb = (8 - pos) / 2f               // y do centro da cabeça relativo ao topo da pauta
+                if (n.duration >= s.divisions * 4) { dn = max(dn, yb - 4f + 0.6f); upv = max(upv, -yb + 0.6f); continue }
+                val stemEnd = if (stemDown) yb + 3.4f else yb - 3.4f
+                dn = max(dn, max(yb + 0.6f, if (n.duration < s.divisions * 4) stemEnd else yb) - 4f)
+                upv = max(upv, -(min(yb - 0.6f, if (!stemDown) stemEnd else yb)))
+                if (n.lyric?.isNotEmpty() == true) hasLy[pi][mi2] = true
+            }
+            downExt[pi][mi2] = dn.coerceAtLeast(0f); upExt[pi][mi2] = upv.coerceAtLeast(0f)
+            if (mm.dyn.any { it.mark != "end" }) hasDyn[pi][mi2] = true
+        }
         val groupGap = 11f
         val sysGap = 5f
         var y = 4f
+        if (header) {
+            var hy = 3.4f
+            if (s.title.isNotBlank() && s.title != "Sem título") {
+                val ts = 3.3f; val tw = textWidth(s.title, ts) * 1.04f
+                items += Txt(s.title, ((widthSp - tw) / 2f).coerceAtLeast(2f), hy + 2.2f, ts, true); hy += 4.6f
+            }
+            for (row in s.credits.groupBy { it.row }.toSortedMap().values) {
+                val cs = 1.75f
+                for (c in row) {
+                    val w = textWidth(c.text, cs)
+                    val x = when (c.align) { 'L' -> 2.4f; 'R' -> (widthSp - 1.8f - w).coerceAtLeast(2f); else -> ((widthSp - w) / 2f).coerceAtLeast(2f) }
+                    items += Txt(c.text, x, hy + 1.6f, cs)
+                }
+                hy += 2.7f
+            }
+            y = hy + 2.2f
+        }
         val systems = ArrayList<SSystem>()
-        val sysMx0 = ArrayList<Float>(); val sysXEnd = ArrayList<Float>(); val sysPartY = ArrayList<Map<Int, Float>>()
+        val sysDyn = ArrayList<FloatArray>(); val sysLy = ArrayList<FloatArray>(); val sysMx0 = ArrayList<Float>(); val sysXEnd = ArrayList<Float>(); val sysPartY = ArrayList<Map<Int, Float>>()
         val msys = IntArray(nMeasures); val mcx = FloatArray(nMeasures); val mmw = FloatArray(nMeasures)
         val mAbsX = arrayOfNulls<List<Float>>(nMeasures)
         val hairs = ArrayList<Hair>()
@@ -237,15 +288,30 @@ object Engrave {
             val topPad = if ((mi until end).any { voltaAt(it) > 0 || hasText(it) }) 5.2f else 3f
             // posições y das pautas
             val staffTops = ArrayList<Float>()
+            // folgas por parte neste sistema: letra e dinâmicas ficam abaixo das notas/hastes mais baixas
+            val dn = FloatArray(s.parts.size); val up = FloatArray(s.parts.size); val dynOff = FloatArray(s.parts.size); val lyOff = FloatArray(s.parts.size); val below = FloatArray(s.parts.size)
+            for (pi in s.parts.indices) {
+                var ly = false; var dy = false
+                for (m2 in mi until end) { dn[pi] = max(dn[pi], downExt[pi][m2]); up[pi] = max(up[pi], upExt[pi][m2]); ly = ly || hasLy[pi][m2]; dy = dy || hasDyn[pi][m2] }
+                dynOff[pi] = 4f + max(2.0f, dn[pi] + 1.9f)
+                lyOff[pi] = 4f + max(3.7f, dn[pi] + 2.5f).let { if (dy) max(it, dynOff[pi] - 4f + 2.2f) else it }
+                below[pi] = (if (ly) lyOff[pi] + 0.9f else if (dy) dynOff[pi] + 0.7f else 4f + dn[pi] + 0.7f) - 4f
+            }
             var yy = sysTopY + topPad
             val groupSpans = ArrayList<Pair<Float, Float>>()
+            var lastGG = groupGap
             for ((gi, g) in groups.withIndex()) {
                 val gTop = yy
-                for ((k, _) in g.withIndex()) { staffTops += yy; if (k < g.size - 1) yy += staffGap }
+                for ((k, pk) in g.withIndex()) {
+                    staffTops += yy
+                    if (k < g.size - 1) yy += max(staffGap, 4f + below[pk] + up[g[k + 1]] + 1.0f)
+                }
                 groupSpans += gTop to (yy + 4f)
-                yy += 4f + groupGap
+                val nextUp = groups.getOrNull(gi + 1)?.let { up[it[0]] } ?: 0f
+                lastGG = max(groupGap, below[g.last()] + nextUp + 3.2f)
+                yy += 4f + lastGG
             }
-            val sysBottom = yy - groupGap
+            val sysBottom = yy - lastGG + max(0f, (groups.lastOrNull()?.let { below[it.last()] } ?: 0f) - 6f)
             // mapa parte -> y da pauta
             val partY = HashMap<Int, Float>()
             var si = 0
@@ -299,7 +365,7 @@ object Engrave {
                 val sm = s.copy(fifths = keyAt[m], beats = beatsAt[m], beatType = btAt[m])
                 for ((pi, p) in s.parts.withIndex()) {
                     val pc = if (p.clef == clefAt[pi][m]) p else p.copy(clef = clefAt[pi][m])
-                    engraveMeasure(sm, pi, pc, m, evs[pi][m], col, absX, cx, cx + mw, partY[pi]!!, measStartQ[pi][m], items, snotes)
+                    engraveMeasure(sm, pi, pc, m, evs[pi][m], col, absX, cx, cx + mw, partY[pi]!!, measStartQ[pi][m], items, snotes, lyOff[pi])
                 }
                 // ritornelo no começo do compasso
                 if (repStartAt(m)) {
@@ -346,7 +412,7 @@ object Engrave {
                             else -> {
                                 openHair[pi]?.let { it.sys2 = sysNo; it.x2 = dx - 0.3f; openHair[pi] = null }
                                 var gx = dx
-                                for (c in d.mark) { val code = DYN_CODE[c] ?: continue; items += Glyph(code, gx, top + 6.0f); gx += DYN_ADV[c] ?: 1.4f }
+                                for (c in d.mark) { val code = DYN_CODE[c] ?: continue; items += Glyph(code, gx, top + dynOff[pi]); gx += DYN_ADV[c] ?: 1.4f }
                             }
                         }
                     }
@@ -393,7 +459,7 @@ object Engrave {
                     m = e2 + 1
                 }
             }
-            sysMx0 += mx0; sysXEnd += xEnd; sysPartY += partY
+            sysMx0 += mx0; sysXEnd += xEnd; sysPartY += partY; sysDyn += dynOff; sysLy += lyOff
             systems += SSystem(sysTopY, sysBottom, x0, xEnd, measures, s.parts.indices.map { partY[it]!! })
             y = sysBottom + sysGap + 6f
             mi = end; sysNo++
@@ -409,7 +475,7 @@ object Engrave {
                 val xa = if (sy == h.sys) h.x else sysMx0[sy]; val xb = if (sy == s2) x2 else sysXEnd[sy] - 0.4f
                 val len = max(xb - xa, 0.1f)
                 val ty = sysPartY[sy][h.part] ?: continue
-                val yc = ty + 5.3f
+                val yc = ty + sysDyn[sy][h.part] - 0.7f
                 val oa = 0.9f * min(acc / total, 1f); val ob = 0.9f * min((acc + len) / total, 1f)
                 val ha = if (h.cresc) oa else 0.9f - oa; val hb = if (h.cresc) ob else 0.9f - ob
                 items += Line(xa, yc - max(ha, 0.05f), xb, yc - max(hb, 0.05f), 0.12f)
@@ -426,7 +492,7 @@ object Engrave {
                          val beamId: Int = -1)
 
     private fun engraveMeasure(s: Score, pi: Int, part: Part, mIdx: Int, evs: List<Ev>, col: MeasureCol, absX: List<Float>,
-                                mx0: Float, mx1: Float, top: Float, startQ: Double, items: MutableList<Item>, snotes: MutableList<SNote>) {
+                                mx0: Float, mx1: Float, top: Float, startQ: Double, items: MutableList<Item>, snotes: MutableList<SNote>, lyDy: Float = 7.7f) {
         val div = s.divisions.toDouble()
         val measure = part.measures.getOrNull(mIdx) ?: return
         val voices = evs.map { it.voice }.distinct().sorted()
@@ -442,7 +508,7 @@ object Engrave {
             val v = valueOf(q)
             val voiceRank = voices.indexOf(e.voice)
             val onsetQ = startQ + e.onset / div
-            if (!e.rest) measure.notes.getOrNull(e.heads[0].idx)?.let { lyricShown(it) }?.let { items += Txt(it, x - 0.1f, top + 4f + 3.7f, LYRIC_SIZE) }
+            if (!e.rest) measure.notes.getOrNull(e.heads[0].idx)?.let { lyricShown(it) }?.let { items += Txt(it, x - 0.1f, top + lyDy, LYRIC_SIZE) }
             if (e.rest) {
                 val whole = e.dur >= s.divisions * 4 * s.beats / s.beatType && !multiVoice
                 val lvl = if (whole) 0 else v.level
@@ -627,9 +693,9 @@ object Engrave {
     }
 
     /** Cena completa: layout + ligaduras. */
-    @Synchronized fun scene(s: Score, widthSp: Float): Scene {
+    @Synchronized fun scene(s: Score, widthSp: Float, header: Boolean = false): Scene {
         stems.clear()
-        val sc = build(s, widthSp)
+        val sc = build(s, widthSp, header)
         val ties = tiesPass(sc, s)
         return Scene(sc.items + ties, sc.width, sc.height, sc.notes, sc.systems)
     }

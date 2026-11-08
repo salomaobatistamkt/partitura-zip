@@ -2,6 +2,15 @@
 
 Aplicativo de partituras para celular e tablet. Funciona offline.
 
+## Novidades da v0.11
+- **Cursor amarelo**: a tela e o som agora contam o tamanho de cada compasso do mesmo jeito (antes divergiam quando uma pauta tinha compasso com soma diferente ou vazio), então o cursor não adianta mais.
+- **Letra e dinâmicas** ficam abaixo das notas e hastes mais baixas; o espaço entre pautas cresce quando precisa. Rodapé (©, direitos reservados) não vira mais letra.
+- **Título e créditos** (letra/música/arranjo, 'SCTB'…) lidos do PDF e mostrados no topo; salvos no MusicXML.
+- **Regência**: boneco 3D (costas, lado, frente; arraste para girar; opção de duas mãos).
+- **Desempenho**: o realce das notas tocando e do teclado não varre mais a música toda a cada quadro.
+- **Gravação**: grade de colcheias quando o ritmo permite e pausas curtíssimas viram ligadura (partitura mais limpa).
+- **Limites honestos**: o boneco 3D, o cursor e o desempenho não foram testados em aparelho; a gravação continua dependendo da qualidade do áudio e do andamento detectado; os padrões de regência não foram revisados por um regente.
+
 ## Novidades da v0.10
 - **Som com instrumentos reais**: piano, coro (aah/ooh), cordas, órgão, flauta etc. tocam por amostras de um SoundFont livre (GeneralUser GS, licença própria que permite uso em software; ver `app/src/main/assets/GENERALUSER-GS-LICENSE.txt`). Em Reprodução dá para voltar ao som sintetizado. A exportação WAV/M4A usa o mesmo som.
 - **Regência com mão animada**: antebraço, palma, dedos e polegar seguem o gesto e "afundam" no tempo; opção de duas mãos espelhadas.

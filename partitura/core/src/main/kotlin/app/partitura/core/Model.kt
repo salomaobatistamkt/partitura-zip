@@ -70,7 +70,11 @@ data class Score(
     var beatType: Int,
     var tempo: Int,
     val parts: MutableList<Part> = mutableListOf(),
+    /** Textos do cabeçalho da partitura (compositor, letrista, arranjador…): [Credit.align] 'L', 'C' ou 'R'; linhas em ordem. */
+    var credits: List<Credit> = emptyList(),
 )
+
+data class Credit(val text: String, val align: Char, val row: Int)
 
 fun Score.copyDeep(): Score = copy(parts = parts.map { p ->
     Part(p.id, p.name, p.measures.map { m -> m.dup() }.toMutableList(), p.clef, p.group, p.inst)

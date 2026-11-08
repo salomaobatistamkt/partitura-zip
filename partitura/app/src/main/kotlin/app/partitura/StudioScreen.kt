@@ -74,7 +74,7 @@ fun StudioScreen(state: AppState, wide: Boolean, goHome: () -> Unit) {
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).onSizeChanged { viewport = it.height }) {
             val spPx = spDp * density
             val widthPx = constraints.maxWidth.toFloat()
-            val scene = remember(s, rev, widthPx, spPx) { Engrave.scene(s, widthPx / spPx) }
+            val scene = remember(s, rev, widthPx, spPx) { Engrave.scene(s, widthPx / spPx, true) }
             val selId = if (!state.hasSel) -1 else scene.notes.indexOfFirst { it.part == state.selP && it.m == state.selM && it.idx == state.selN }
             val activeIds by remember(scene) { derivedStateOf { if (p.active) scene.soundingAt(p.posQ) else emptyList() } }
             val activeSet = remember(activeIds) { activeIds.toSet() }
@@ -201,10 +201,20 @@ fun StudioScreen(state: AppState, wide: Boolean, goHome: () -> Unit) {
 private fun pianoActive(state: AppState, p: Player): Set<Int> {
     val s = state.score ?: return emptySet()
     val rev = state.rev
-    val ev = remember(s, rev, p.usedTempo) { Synth.events(s, p.usedTempo) }
+    val ev = remember(s, rev, p.usedTempo) { Synth.events(s, p.usedTempo).sortedBy { it.startSec } }
+    val maxDur = remember(ev) { ev.maxOfOrNull { it.durSec } ?: 0.0 }
     val set by remember(ev) {
         derivedStateOf {
-            if (!p.active) emptySet<Int>() else { val t = p.posSec; ev.filter { it.startSec <= t + 1e-6 && t < it.startSec + it.durSec }.map { it.midi }.toSet() }
+            if (!p.active) emptySet<Int>() else {
+                val t = p.posSec
+                // só as notas que começaram há menos que a maior duração (busca binária, em vez de varrer a música toda a cada quadro)
+                var lo = 0; var hi = ev.size
+                while (lo < hi) { val mid = (lo + hi) ushr 1; if (ev[mid].startSec <= t + 1e-6) lo = mid + 1 else hi = mid }
+                val out = HashSet<Int>()
+                var i = lo - 1
+                while (i >= 0 && ev[i].startSec >= t - maxDur - 1e-6) { val e = ev[i]; if (t < e.startSec + e.durSec) out += e.midi; i-- }
+                out
+            }
         }
     }
     return set

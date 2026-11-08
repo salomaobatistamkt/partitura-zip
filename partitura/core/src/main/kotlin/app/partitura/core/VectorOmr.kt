@@ -79,7 +79,7 @@ object VectorOmr {
         if (pages.isEmpty()) return null
         val warnings = ArrayList<String>()
         val systemsAll = ArrayList<SystemData>()
-        var title: String? = null; var tempo: Int? = null
+        var title: String? = null; var tempo: Int? = null; var credits: List<Credit> = emptyList()
         for ((pi, pg) in pages.withIndex()) {
             progress?.invoke(pi, pages.size)
             val d = try { PdfContent.read(pdf, pg) } catch (e: Exception) { continue }
@@ -89,11 +89,14 @@ object VectorOmr {
             if (!hasMusic) continue
             val r = analyzePage(d, gl, pi == 0)
             systemsAll += r.systems
+            if (pi == 0) credits = r.credits
             if (pi == 0 || title == null) { r.title?.let { if (title == null) title = it }; r.tempo?.let { if (tempo == null) tempo = it } }
         }
         progress?.invoke(pages.size, pages.size)
         if (systemsAll.isEmpty()) return null
-        return assemble(systemsAll, o, title, tempo, warnings)
+        val res = assemble(systemsAll, o, title, tempo, warnings)
+        res.score.credits = credits
+        return res
     }
 
     private class StaffData(val staff: Staff, val clef: Char, val fifths: Int, val ts: Pair<Int, Int>?, val events: List<Ev>, val heads: List<Head>, val lyricsOn: Boolean,
@@ -107,7 +110,7 @@ object VectorOmr {
         val dyns = ArrayList<DynMark>(); val words = ArrayList<WordMark>(); val hairs = ArrayList<HairMark>(); val voltas = ArrayList<VoltaMark>(); val ferm = ArrayList<Pair<Double, Double>>()
     }
     private class Harmony0(val step: Char, val alter: Int, val kind: String, val bassStep: Char?, val bassAlter: Int)
-    private class PageResult(val systems: List<SystemData>, val title: String?, val tempo: Int?)
+    private class PageResult(val systems: List<SystemData>, val title: String?, val tempo: Int?, val credits: List<Credit> = emptyList())
 
     // ----------------------------------------------------------------- análise de uma página
     private class Run(val text: String, val x0: Double, val x1: Double, val y: Double, val size: Double)
@@ -153,7 +156,11 @@ object VectorOmr {
         val beams = d.fills.filter { !it.curved && it.pts.size in 4..6 }
         val curves = d.fills.filter { it.curved }
         // texto
-        val lyricToks = textTokens(gl, false)
+        val lyricToks = textTokens(gl, false).let { all ->
+            // rodapé (©, direitos reservados, número de página) não é letra: descarta a linha toda e o que está na margem de baixo
+            val footRows = all.filter { it.text.contains("©") || it.text.lowercase().startsWith("copyright") || it.text.lowercase().startsWith("direitos") || it.text.lowercase() == "reservados." }.map { it.y }
+            all.filter { t -> t.y > d.height * 0.06 && footRows.none { abs(it - t.y) < 3.0 } }
+        }
         val runs = textRuns(gl)
         val out = ArrayList<SystemData>()
         for (sy in systems) {
@@ -272,13 +279,43 @@ object VectorOmr {
         for (g in gl) if (g.c == "fermata") { val si = sysOf(g.y, 7.0); if (si >= 0) out[si].ferm += g.x to g.y }
         // título e andamento (primeira página)
         var title: String? = null; var tempo: Int? = null
+        var credits: List<Credit> = emptyList()
+        var titleY = Double.NaN
         if (first) {
             val tg = gl.filter { !isMusicFont(it.font) && it.c == "" && it.ch in 32..0x2FF }
             val big = tg.maxOfOrNull { it.size }
             if (big != null && big > 11) {
                 val line = tg.filter { it.size >= big - 0.5 }.sortedBy { it.x }
-                val y0 = line.maxOf { it.y }
+                val y0 = line.maxOf { it.y }; titleY = y0
                 title = line.filter { abs(it.y - y0) < big }.sortedBy { it.x }.joinToString("") { String(Character.toChars(it.ch)) }.trim().ifBlank { null }
+            }
+            // textos do cabeçalho: acima do primeiro sistema, longe o bastante para não serem cifras nem andamento
+            run {
+                val st0 = staves.firstOrNull() ?: return@run
+                val hh = st0.ys[0] - st0.ys[4]
+                val above = tg.filter { it.y > st0.ys[0] + hh * 2.2 }.sortedByDescending { it.y }
+                val rows = ArrayList<ArrayList<G>>()
+                for (g in above) { val r = rows.firstOrNull { abs(it[0].y - g.y) < max(it[0].size, g.size) * 0.6 }; if (r != null) r += g else rows += arrayListOf(g) }
+                val list = ArrayList<Credit>(); var rowNo = 0
+                var prevY = titleY
+                val STOP = setOf("piano", "unis.", "unís.", "div.", "solo", "uh", "coro", "s", "c", "t", "b", "ah", "oh", "tutti")
+                for (r in rows.sortedByDescending { it[0].y }.filter { titleY.isNaN() || it[0].y < titleY - 0.5 }) {
+                    if (!prevY.isNaN() && prevY - r[0].y > 3.6 * r[0].size) break   // o cabeçalho é um bloco junto ao título
+                    prevY = r[0].y
+                    val sorted = r.sortedBy { it.x }
+                    val runs = ArrayList<ArrayList<G>>()
+                    for (g in sorted) { val last = runs.lastOrNull(); if (last != null && g.x - (last.last().x + last.last().adv) < g.size * 1.3) last += g else runs += arrayListOf(g) }
+                    var any = false
+                    for (run in runs) {
+                        val t = run.joinToString("") { String(Character.toChars(it.ch)) }.replace(Regex("\\s+"), " ").trim()
+                        if (t.length < 2 || t.lowercase() in STOP || Regex("[a-zà-ú]-[a-zà-ú]").containsMatchIn(t) || Regex("=\\s*\\d").containsMatchIn(t) || t == title) continue
+                        val x0 = run.first().x; val x1 = run.last().x + run.last().adv
+                        val frac = ((x0 + x1) / 2) / d.width
+                        list += Credit(t, if (frac < 0.33) 'L' else if (frac > 0.67) 'R' else 'C', rowNo); any = true
+                    }
+                    if (any) rowNo++
+                }
+                credits = list.take(8)
             }
             for (si in out.indices) { val w = out[si].words.firstOrNull { it.kind == "tempo" }; if (w != null) { tempo = w.bpm; break } }
             if (tempo == null) {
@@ -290,7 +327,7 @@ object VectorOmr {
                 }
             }
         }
-        return PageResult(out, title, tempo)
+        return PageResult(out, title, tempo, credits)
     }
 
     private fun detectStaves(segs: List<Seg>): List<Staff> {

@@ -198,10 +198,16 @@ object ScoreFromNotes {
         }
         val barTicks = 16 * o.beats / o.beatType
         // quantiza
+        // grade: colcheia quando a maioria dos começos cai perto dela (partitura legível); semicolcheia só se o ritmo realmente pedir
+        val near8 = ev.count { e -> val u = (e.start - t0) / (tickSec * 2); abs(u - Math.round(u)) < 0.2 }
+        val coarse = near8 >= ev.size * 0.6
+        val snap = if (coarse) 2 else 1
+        val gapMerge = if (coarse) 3 else 1
+        fun sn(v: Int) = if (snap == 1) v else Math.floorDiv(v + 1, 2) * 2
         val qs = ev.map { e ->
-            val s = ((e.start - t0) / tickSec).roundToInt()
-            val en = ((e.end - t0) / tickSec).roundToInt()
-            Q(s, max(en, s + 1), e.midi, e.amp)
+            val s = sn(((e.start - t0) / tickSec).roundToInt())
+            val en = sn(((e.end - t0) / tickSec).roundToInt())
+            Q(s, max(en, s + snap), e.midi, e.amp)
         }
         val minTick = qs.minOf { it.s }
         val lead = if (minTick < 0) ((-minTick - 1) % barTicks + 1) else 0     // anacruse (ticks antes do compasso 1)
@@ -231,7 +237,8 @@ object ScoreFromNotes {
                 var u = t; while (u + 1 < ticks && topId[u + 1] == topId[t]) u++
                 res += Seg(t, u + 1, listOf(top[t])); t = u + 1
             }
-            return res
+            // pausas curtíssimas entre notas viram nota ligada (legato), em vez de pausa de semicolcheia
+            return res.mapIndexed { i, sg -> val nx = res.getOrNull(i + 1); if (nx != null && nx.s - sg.e in 1..gapMerge) Seg(sg.s, nx.s, sg.p) else sg }
         }
 
         fun partFrom(segs: List<Seg>, id: String, name: String, clef: Char, inst: String): Part =
@@ -245,7 +252,8 @@ object ScoreFromNotes {
                 for ((i, k) in keys.withIndex()) {
                     val g = by.getValue(k)
                     val nxt = keys.getOrNull(i + 1) ?: Int.MAX_VALUE
-                    val e = min(g.maxOf { it.e }, nxt)
+                    val me = g.maxOf { it.e }
+                    val e = if (nxt != Int.MAX_VALUE && nxt - me in 1..gapMerge) nxt else min(me, nxt)
                     segs += Seg(k, max(e, k + 1), g.map { it.midi }.distinct())
                 }
                 return segs
