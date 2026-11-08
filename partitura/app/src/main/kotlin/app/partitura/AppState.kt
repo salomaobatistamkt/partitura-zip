@@ -208,7 +208,8 @@ class AppState(private val app: Context) {
         }
         if (fromQ != null) {
             val t = fromQ * 60.0 / tempo
-            if (t >= from && t < (if (to > 1e8) times.last() else to)) from = t
+            val endT = if (to > 1e8) times.last() else to
+            if (t >= from && t < endT) from = t
         }
         player.start(s, tempo, volumes.map { it.toDouble() }, from, to, loop)
     }
