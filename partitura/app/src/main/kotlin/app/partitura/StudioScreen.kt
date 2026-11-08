@@ -268,6 +268,48 @@ private fun EditPanel(state: AppState, s: Score) {
             TextBtn("− compasso ${state.selM + 1}", { state.edit { Edit.deleteMeasure(it, state.selM) } }, enabled = bars > 1)
             TextBtn("Tocar na pauta", { state.drawTool = !state.drawTool }, selected = state.drawTool)
         }
+        var lyricDlg by remember { mutableStateOf(false) }
+        var chordDlg by remember { mutableStateOf(false) }
+        Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            TextBtn("Duplicar compasso", { state.edit { Edit.duplicateMeasure(it, state.selM) } })
+            TextBtn("+ vazio depois", { state.edit { Edit.insertMeasureAfter(it, state.selM) } })
+            TextBtn("Copiar", { state.clipNotes = Edit.copyMeasure(s, state.selP, state.selM); state.toast("Compasso ${state.selM + 1} copiado") }, enabled = part != null)
+            TextBtn("Colar", {
+                val c = state.clipNotes
+                if (c == null) state.toast("Nada copiado")
+                else if (!Edit.pasteMeasure(s.copyDeep(), state.selP, state.selM, c)) state.toast("O compasso copiado tem outra duração")
+                else state.edit { Edit.pasteMeasure(it, state.selP, state.selM, c) }
+            }, enabled = state.clipNotes != null)
+            TextBtn("Limpar compasso", { state.edit { Edit.clearMeasure(it, state.selP, state.selM) } })
+            TextBtn("Oitava ↑", { state.edit { Edit.octaveMeasure(it, state.selP, state.selM, 1) } })
+            TextBtn("Oitava ↓", { state.edit { Edit.octaveMeasure(it, state.selP, state.selM, -1) } })
+            TextBtn("Letra…", { lyricDlg = true }, enabled = onNote)
+            TextBtn("Acorde…", { chordDlg = true }, enabled = cur != null)
+        }
+        if (lyricDlg && cur != null) {
+            var txt by remember(state.selP, state.selM, state.selN) { mutableStateOf(cur.lyric?.let { it + if (cur.syl == 'b' || cur.syl == 'm') "-" else "" } ?: "") }
+            AlertDialog(
+                onDismissRequest = { lyricDlg = false },
+                title = { Text("Sílaba desta nota") },
+                text = { Column { OutlinedTextField(value = txt, onValueChange = { txt = it }, singleLine = true, label = { Text("Sílaba") }); Text("Termine com “-” quando a palavra continua na próxima nota (ex.: a-). Vazio apaga.", style = MaterialTheme.typography.bodySmall) } },
+                confirmButton = { Button(onClick = { state.edit { Edit.setLyric(it, state.selP, state.selM, state.selN, txt) }; state.moveSel(1); lyricDlg = false }) { Text("Aplicar e ir para a próxima") } },
+                dismissButton = { TextButton(onClick = { lyricDlg = false }) { Text("Cancelar") } },
+            )
+        }
+        if (chordDlg && cur != null) {
+            val ms = part?.measures?.getOrNull(state.selM)?.notes ?: emptyList()
+            var at = 0; for (i in 0 until state.selN) if (!ms[i].chord) at += ms[i].duration
+            val existing = s.parts[0].measures.getOrNull(state.selM)?.harmony?.firstOrNull { it.at == at }
+            var txt by remember(state.selP, state.selM, state.selN) { mutableStateOf(existing?.text() ?: "") }
+            val parsed = Chords.parse(txt)
+            AlertDialog(
+                onDismissRequest = { chordDlg = false },
+                title = { Text("Acorde no compasso ${state.selM + 1}") },
+                text = { Column { OutlinedTextField(value = txt, onValueChange = { txt = it }, singleLine = true, label = { Text("Cifra (Am7, F♯m, B♭/D, C°…)") }, isError = txt.isNotBlank() && parsed == null); Text("Vale a partir desta nota. Vazio apaga o acorde daqui.", style = MaterialTheme.typography.bodySmall) } },
+                confirmButton = { Button(enabled = txt.isBlank() || parsed != null, onClick = { state.edit { Edit.setChord(it, 0, state.selM, at, if (txt.isBlank()) null else parsed) }; chordDlg = false }) { Text("Aplicar") } },
+                dismissButton = { TextButton(onClick = { chordDlg = false }) { Text("Cancelar") } },
+            )
+        }
         val issues = Validate.measureDurations(s)
         if (issues.isNotEmpty()) Text("Atenção: ${issues.size} compasso(s) com duração diferente de ${s.beats}/${s.beatType}. ${issues.first()}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error, maxLines = 2)
     }

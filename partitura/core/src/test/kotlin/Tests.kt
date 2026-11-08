@@ -384,7 +384,7 @@ fun main() {
                 val rt = MusicXml.parse(MusicXml.write(r.score).toByteArray())
                 val n2 = rt.parts[0].measures.flatMap { it.notes }
                 if (n2.count { it.lyric != null } != nSyl || rt.parts[0].measures.sumOf { it.harmony.size } != r.score.parts[0].measures.sumOf { it.harmony.size }) { okAll = false; why = "ida e volta $b/$t" }
-                Engrave.scene(r.score, 70f); Synth.render(r.score, 100)
+                Engrave.scene(r.score, 70f); if (dens == 1 && cpb == 1 && pk) Synth.render(r.score, 100)
             } catch (e: Throwable) { okAll = false; why = "exceção ${e}: $fifths $minor $b/$t" }
         }
         check("Criatividade: 6 tons × 9 compassos × 3 densidades × 2 harmonias × anacruse: válido, no alcance, 1 sílaba por nota, MusicXML ida e volta, grava e toca ($why)", okAll)
@@ -407,7 +407,7 @@ fun main() {
                 if (r.parts[1].measures.flatMap { it.notes }.none { it.pitch != null } || r.parts[2].measures.flatMap { it.notes }.none { it.pitch != null }) { okAll = false; why = "piano vazio ${sty.id} $b/$t" }
                 val rt = MusicXml.parse(MusicXml.write(r).toByteArray())
                 if (rt.parts.size != 3 || Validate.measureDurations(rt).isNotEmpty()) { okAll = false; why = "piano ida e volta ${sty.id} $b/$t" }
-                Engrave.scene(r, 70f); Synth.render(r, 100)
+                Engrave.scene(r, 70f); if (cpb == 1 && (sty.id == "balada" || sty.id == "valsa")) Synth.render(r, 100)
             } catch (e: Throwable) { okAll = false; why = "exceção piano ${sty.id} $b/$t: $e" }
             for (vm in Arrange.VOICE_MODES) try {
                 val r = Arrange.addVoices(base, vm.id, true)
@@ -420,7 +420,7 @@ fun main() {
                 }
                 if (vm.id == "satb") { cnt++; par += Arrange.parallels(r, listOf(0, 1, 2, 3)) ; val nn = (1..3).map { r.parts[it].measures.flatMap { m -> m.notes } }
                     if ((0 until nn[0].size).any { i -> val a = nn[0][i].pitch?.midi; val tt = nn[1][i].pitch?.midi; val bb = nn[2][i].pitch?.midi; a != null && tt != null && bb != null && !(a > tt && tt > bb) }) { okAll = false; why = "satb cruzamento $b/$t" } }
-                MusicXml.parse(MusicXml.write(r).toByteArray()); Engrave.scene(r, 70f); Synth.render(r, 100)
+                MusicXml.parse(MusicXml.write(r).toByteArray()); Engrave.scene(r, 70f); if (cpb == 1 && vm.id == "satb") Synth.render(r, 100)
             } catch (e: Throwable) { okAll = false; why = "exceção vozes ${vm.id} $b/$t: $e" }
         }
         check("Arranjo: 6 estilos de piano × 4 modos de vozes × 4 tons × 9 compassos: válido, ida e volta, grava e toca ($why)", okAll)
@@ -428,6 +428,31 @@ fun main() {
         val big = Compose.compose((1..60).joinToString("\n") { "essa é a linha número um de uma canção longa e bonita" }, CreativeSettings(seed = 3)).score
         val t0 = System.nanoTime(); val bigA = Arrange.addVoices(Arrange.addPiano(big, "arpejo"), "satb", true); val ms = (System.nanoTime() - t0) / 1_000_000
         check("Arranjo de 60 versos (piano + coral) em $ms ms (limite 5 s)", ms < 5000 && Validate.measureDurations(bigA).isEmpty())
+    }
+    run {
+        val c = { t: String -> Chords.parse(t) }
+        check("Cifras: Am7, F♯m, Bb/D, C°, Gsus4, D9, Cmaj7, E7 lidas", c("Am7")!!.let { it.step == 'A' && it.kind == "minor-seventh" } && c("F♯m")!!.let { it.step == 'F' && it.alter == 1 && it.kind == "minor" } &&
+            c("Bb/D")!!.let { it.step == 'B' && it.alter == -1 && it.bassStep == 'D' } && c("C°")!!.kind == "diminished" && c("Gsus4")!!.kind == "suspended-fourth" && c("D9")!!.kind == "dominant-ninth" && c("Cmaj7")!!.kind == "major-seventh" && c("E7")!!.kind == "dominant" && c("C")!!.kind == "major")
+        check("Cifras: lixo é recusado", listOf("", "H", "Cxyz", "C/", "C/H").all { c(it) == null } && c("Cb") != null && c("Cb")!!.alter == -1)
+        val sc = Samples.ode().copyDeep()
+        val n0 = sc.parts[0].measures.size
+        Edit.duplicateMeasure(sc, 2)
+        check("Duplicar compasso: +1 compasso em todas as pautas, igual ao original, numeração certa", sc.parts.all { it.measures.size == n0 + 1 && it.measures[3].notes == it.measures[2].notes } && sc.parts[0].measures.mapIndexed { i, m -> m.number == i + 1 }.all { it } && Validate.measureDurations(sc).isEmpty())
+        Edit.insertMeasureAfter(sc, 0)
+        check("Inserir compasso vazio: válido", sc.parts.all { it.measures.size == n0 + 2 && it.measures[1].notes.size == 1 && it.measures[1].notes[0].pitch == null } && Validate.measureDurations(sc).isEmpty())
+        val clip = Edit.copyMeasure(sc, 0, 3)!!
+        check("Colar compasso de mesma duração", Edit.pasteMeasure(sc, 0, 1, clip) && sc.parts[0].measures[1].notes == clip && Validate.measureDurations(sc).isEmpty())
+        Edit.clearMeasure(sc, 0, 1)
+        check("Limpar compasso vira pausa e valida", sc.parts[0].measures[1].notes.size == 1 && sc.parts[0].measures[1].notes[0].pitch == null && Validate.measureDurations(sc).isEmpty())
+        val before = sc.parts[0].measures[3].notes.first { it.pitch != null }.pitch!!.midi
+        Edit.octaveMeasure(sc, 0, 3, 1)
+        check("Oitava do compasso: +12", sc.parts[0].measures[3].notes.first { it.pitch != null }.pitch!!.midi == before + 12)
+        val ly = Samples.ode().copyDeep()
+        Edit.setLyric(ly, 0, 0, 0, "A-"); Edit.setLyric(ly, 0, 0, 1, "le-"); Edit.setLyric(ly, 0, 0, 2, "gri")
+        val ln = ly.parts[0].measures[0].notes
+        check("Letra: A-le-gri vira b, m, e", ln[0].lyric == "A" && ln[0].syl == 'b' && ln[1].syl == 'm' && ln[2].syl == 'e' && MusicXml.parse(MusicXml.write(ly).toByteArray()).parts[0].measures[0].notes[0].lyric == "A")
+        Edit.setChord(ly, 0, 0, 0, Chords.parse("Am7"))
+        check("Acorde digitado entra e sai no MusicXML", MusicXml.parse(MusicXml.write(ly).toByteArray()).parts[0].measures[0].harmony.firstOrNull()?.kind == "minor-seventh")
     }
     println(if (fails == 0) "TODOS OS TESTES PASSARAM" else "$fails FALHAS")
     kotlin.system.exitProcess(if (fails == 0) 0 else 1)

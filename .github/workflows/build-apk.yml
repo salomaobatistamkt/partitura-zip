@@ -16,7 +16,10 @@ jobs:
         with: { gradle-version: '8.9' }
       - name: Testes do núcleo
         run: |
-          curl -sSL -o kotlinc.zip https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip
+          for i in 1 2 3 4 5 6 7 8; do
+            curl -fsSL -o kotlinc.zip https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip && unzip -tq kotlinc.zip >/dev/null && break
+            echo "download falhou ($i), tentando de novo"; rm -f kotlinc.zip; sleep $((i*15))
+          done
           unzip -q kotlinc.zip
           kotlinc/bin/kotlinc partitura/core/src/main/kotlin partitura/core/src/test/kotlin -include-runtime -d t.jar
           java -jar t.jar

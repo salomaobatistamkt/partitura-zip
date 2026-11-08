@@ -179,6 +179,8 @@ class AppState(private val app: Context) {
     var selM by mutableIntStateOf(0)
     var selN by mutableIntStateOf(0)
     var hasSel by mutableStateOf(false)
+    /** Compasso copiado (para colar em outro compasso de mesma duração). */
+    var clipNotes by mutableStateOf<List<Note>?>(null)
     var dark by mutableStateOf(prefs.getBoolean("dark", true))
         private set
     /** Endereço do servidor de leitura (sem /omr) e chave de acesso opcional. */

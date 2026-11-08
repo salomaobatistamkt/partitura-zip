@@ -240,4 +240,57 @@ object Edit {
         if (h != null) ms.harmony.add(h.copy(at = at))
         ms.harmony.sortBy { it.at }
     }
+
+    private fun lenOfMeasure(m: Measure): Int = m.notes.filter { !it.chord }.groupBy { it.voice }.values.maxOfOrNull { l -> l.sumOf { it.duration } } ?: 0
+
+    /** Insere depois do compasso [m] uma cópia dele em todas as pautas (notas e acordes). */
+    fun duplicateMeasure(s: Score, m: Int) {
+        for (part in s.parts) { val src = part.measures.getOrNull(m) ?: continue; part.measures.add(m + 1, Measure(0, src.notes.toMutableList(), src.harmony.toMutableList())) }
+        for (part in s.parts) part.measures.forEachIndexed { i, mm -> part.measures[i] = mm.copy(number = i + 1) }
+    }
+
+    /** Insere um compasso vazio depois do compasso [m] em todas as pautas. */
+    fun insertMeasureAfter(s: Score, m: Int) {
+        val full = s.divisions * 4 * s.beats / s.beatType
+        for (part in s.parts) if (m in part.measures.indices) part.measures.add(m + 1, Measure(0, mutableListOf(Note(null, full))))
+        for (part in s.parts) part.measures.forEachIndexed { i, mm -> part.measures[i] = mm.copy(number = i + 1) }
+    }
+
+    /** Esvazia o compasso [m] da parte [p] (vira pausa); os acordes continuam. */
+    fun clearMeasure(s: Score, p: Int, m: Int) {
+        val len = measureLengths(s).getOrNull(m) ?: return
+        val ms = s.parts.getOrNull(p)?.measures?.getOrNull(m) ?: return
+        ms.notes.clear(); ms.notes.add(Note(null, len))
+    }
+
+    fun copyMeasure(s: Score, p: Int, m: Int): List<Note>? = s.parts.getOrNull(p)?.measures?.getOrNull(m)?.notes?.toList()
+
+    /** Cola as notas copiadas no compasso [m] da parte [p]; só se a duração do compasso for a mesma. */
+    fun pasteMeasure(s: Score, p: Int, m: Int, src: List<Note>): Boolean {
+        val ms = s.parts.getOrNull(p)?.measures?.getOrNull(m) ?: return false
+        val tmp = Measure(0, src.toMutableList())
+        if (lenOfMeasure(tmp) != lenOfMeasure(ms)) return false
+        ms.notes.clear(); ms.notes.addAll(src)
+        return true
+    }
+
+    /** Sobe ou desce [d] oitavas todas as notas do compasso [m] da parte [p]. */
+    fun octaveMeasure(s: Score, p: Int, m: Int, d: Int) {
+        val ms = s.parts.getOrNull(p)?.measures?.getOrNull(m) ?: return
+        ms.notes.replaceAll { n -> val pt = n.pitch; if (pt == null || pt.midi + 12 * d !in 12..120) n else n.copy(pitch = pt.copy(octave = pt.octave + d)) }
+    }
+
+    /** Define a sílaba da nota. Terminar em "-" continua a palavra na próxima nota. Vazio apaga. */
+    fun setLyric(s: Score, p: Int, m: Int, n: Int, text: String) {
+        val ms = s.parts.getOrNull(p)?.measures?.getOrNull(m) ?: return
+        val note = ms.notes.getOrNull(n) ?: return
+        val t = text.trim()
+        if (t.isEmpty()) { ms.notes[n] = note.copy(lyric = null, syl = 's'); return }
+        val all = s.parts[p].measures.flatMap { it.notes }.filter { !it.chord }
+        val idx = all.indexOfFirst { it === note }
+        val prevOpen = idx > 0 && all[idx - 1].let { it.lyric != null && (it.syl == 'b' || it.syl == 'm') }
+        val cont = t.endsWith("-")
+        val word = t.trimEnd('-')
+        ms.notes[n] = note.copy(lyric = word, syl = if (cont) (if (prevOpen) 'm' else 'b') else (if (prevOpen) 'e' else 's'))
+    }
 }
