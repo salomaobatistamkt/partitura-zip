@@ -1,0 +1,26 @@
+name: Build APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: '8.9' }
+      - name: Testes do núcleo
+        run: |
+          curl -sSL -o kotlinc.zip https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip
+          unzip -q kotlinc.zip
+          kotlinc/bin/kotlinc partitura/core/src/main/kotlin partitura/core/src/test/kotlin -include-runtime -d t.jar
+          java -jar t.jar
+      - name: APK debug
+        run: gradle -p partitura :app:assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: partitura-debug-apk
+          path: partitura/app/build/outputs/apk/debug/app-debug.apk
