@@ -36,7 +36,29 @@ data class Harmony(val at: Int, val step: Char, val alter: Int, val kind: String
     }
 }
 
-data class Measure(val number: Int, val notes: MutableList<Note> = mutableListOf(), val harmony: MutableList<Harmony> = mutableListOf())
+/**
+ * Dinâmica ou gesto de intensidade num ponto do compasso ([at] em divisões desde o início do compasso).
+ * [mark]: pppp ppp pp p mp mf f ff fff ffff sf sfz fp rfz; "cresc" / "dim" = início de crescendo / diminuendo; "end" = fim dele.
+ */
+data class Dyn(val at: Int, val mark: String)
+
+/**
+ * Compasso de uma pauta. Os campos depois de [harmony] são opcionais e valem para o compasso inteiro (todas as pautas):
+ * [dyn] dinâmicas; [tempo] novo andamento (♩/min) a partir daqui; [fifths]/[beats]/[beatType] mudança de armadura/fórmula;
+ * [repeatStart]/[repeatEnd] ritornelos; [volta] casa de repetição (1, 2…; 0 = nenhuma); [rit] % de mudança de andamento ("rit." < 0, "accel." > 0);
+ * [clef] mudança de clave nesta pauta (G, F ou C).
+ */
+data class Measure(
+    val number: Int, val notes: MutableList<Note> = mutableListOf(), val harmony: MutableList<Harmony> = mutableListOf(),
+    val dyn: MutableList<Dyn> = mutableListOf(),
+    var tempo: Int? = null, var fifths: Int? = null, var beats: Int? = null, var beatType: Int? = null,
+    var repeatStart: Boolean = false, var repeatEnd: Boolean = false, var volta: Int = 0, var rit: Int = 0, var clef: Char? = null,
+    /** "fermata" quando há fermata no compasso (a última nota soa mais longa). */
+    var mark: String? = null,
+) {
+    /** Cópia independente (listas novas) mantendo todos os campos opcionais. */
+    fun dup(): Measure = Measure(number, notes.toMutableList(), harmony.toMutableList(), dyn.toMutableList(), tempo, fifths, beats, beatType, repeatStart, repeatEnd, volta, rit, clef, mark)
+}
 
 data class Part(val id: String, val name: String, val measures: MutableList<Measure> = mutableListOf(), var clef: Char = 'G', val group: String = id, var inst: String = "piano")
 
@@ -51,5 +73,5 @@ data class Score(
 )
 
 fun Score.copyDeep(): Score = copy(parts = parts.map { p ->
-    Part(p.id, p.name, p.measures.map { m -> Measure(m.number, m.notes.toMutableList(), m.harmony.toMutableList()) }.toMutableList(), p.clef, p.group, p.inst)
+    Part(p.id, p.name, p.measures.map { m -> m.dup() }.toMutableList(), p.clef, p.group, p.inst)
 }.toMutableList())

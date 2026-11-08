@@ -39,6 +39,7 @@ class Player {
     private var frames = 0
     private var loop = false
     private var fromSec = 0.0
+    private var tl: Playlist.Timeline? = null
     var playing by mutableStateOf(false)
     var paused by mutableStateOf(false)
     var busy by mutableStateOf(false)
@@ -48,6 +49,8 @@ class Player {
     var posSec by mutableDoubleStateOf(0.0)
     var usedTempo by mutableIntStateOf(100)
     val active: Boolean get() = playing || paused
+    /** Posição atual na partitura em semínimas (sem repetições): acompanha ritornelos, ritardandos e mudanças de andamento. */
+    val posQ: Double get() { val t = tl; return if (t == null || kind != "music") posSec * usedTempo / 60.0 else t.scoreQ(posSec) }
 
     private val keyCache = HashMap<String, ShortArray>()
     private val keyTracks = ArrayList<AudioTrack>()
@@ -59,15 +62,16 @@ class Player {
         playing = false; paused = false; busy = false
     }
 
-    fun start(score: Score, tempo: Int, volumes: List<Double>, from: Double, to: Double, loop: Boolean) {
+    fun start(score: Score, tempo: Int, volumes: List<Double>, from: Double, to: Double, loop: Boolean, mix: Mix? = null) {
         stop()
         val my = token
         busy = true; kind = "music"
         val snapshot = score.copyDeep()
+        val tline = Playlist.timeline(snapshot, tempo, true)
         thread {
             var t: AudioTrack? = null
             try {
-                val prep = Synth.prepare(snapshot, tempo, volumes, from, to)
+                val prep = Synth.prepare(snapshot, tempo, volumes, from, to, true, mix)
                 val limit = if (to < 1e8) ((to - from) * Synth.RATE).toInt() + (if (loop) 0 else Synth.RATE / 3) else prep.total
                 val total = minOf(prep.total, limit).coerceAtLeast(1)
                 val cache = ShortArray(total)
@@ -92,7 +96,7 @@ class Player {
                         started = true
                         main.post {
                             if (my != token) { try { tr.release() } catch (_: Exception) {}; return@post }
-                            track = tr; frames = total; this.loop = loop; fromSec = from; usedTempo = tempo
+                            track = tr; tl = tline; frames = total; this.loop = loop; fromSec = from; usedTempo = tempo
                             posSec = from; playing = true; paused = false; busy = false
                             try { tr.play() } catch (_: Exception) {}
                             poll(my, tr)
@@ -131,7 +135,7 @@ class Player {
             val t = newTrack(pcm.size)
             t.write(pcm, 0, pcm.size)
             t.setLoopPoints(0, pcm.size, -1)
-            track = t; frames = pcm.size; loop = true; fromSec = 0.0; usedTempo = tempo
+            track = t; tl = null; frames = pcm.size; loop = true; fromSec = 0.0; usedTempo = tempo
             posSec = 0.0; playing = true; paused = false; busy = false
             t.play()
             poll(my, t)
@@ -206,6 +210,11 @@ class AppState(private val app: Context) {
     var projectName by mutableStateOf<String?>(null)
     var tempo by mutableIntStateOf(100)
     val volumes = mutableStateListOf<Float>()
+    /** Mesa de som: vozes/instrumentos com volume, mudo, solo e timbre. [mixRev] muda quando a mesa é alterada (para a tela atualizar). */
+    var mix by mutableStateOf<Mix?>(null)
+    var mixRev by mutableIntStateOf(0)
+    fun rebuildMix() { val sc = score ?: return; val nm = Tracks.derive(sc); nm.inherit(mix); mix = nm; mixRev++ }
+    fun mixChanged() { mixRev++ }
     val player = Player()
 
     var editMode by mutableStateOf(false)
@@ -258,6 +267,7 @@ class AppState(private val app: Context) {
         projectName = name
         tempo = s.tempo
         volumes.clear(); repeat(s.parts.size) { volumes.add(1f) }
+        mix = null; rebuildMix()
         selP = 0; selM = 0; selN = 0; hasSel = false
         rangeFrom = 0; rangeTo = 0
         rev++
@@ -304,6 +314,7 @@ class AppState(private val app: Context) {
         val n = score?.parts?.size ?: 0
         while (volumes.size < n) volumes.add(1f)
         while (volumes.size > n) volumes.removeAt(volumes.size - 1)
+        rebuildMix()
     }
 
     fun timbreOf(p: Int): String = score?.parts?.getOrNull(p)?.inst ?: "piano"
@@ -383,17 +394,38 @@ class AppState(private val app: Context) {
             to = times[rangeTo.coerceIn(1, times.size - 1)]
         }
         if (fromQ != null) {
-            val t = fromQ * 60.0 / tempo
+            val t = Playlist.timeline(s, tempo, true).secOfScoreQ(fromQ)
             val endT = if (to > 1e8) times.last() else to
             if (t >= from && t < endT) from = t
         }
-        player.start(s, tempo, volumes.map { it.toDouble() }, from, to, loop)
+        rebuildMix()
+        player.start(s, tempo, volumes.map { it.toDouble() }, from, to, loop, mix?.snapshot())
     }
 
     /** Se estiver tocando, recomeça do ponto atual (usado ao mudar andamento ou volume). */
     fun restartIfPlaying() {
         val p = player
-        if (p.playing) play(p.posSec * p.usedTempo / 60.0)
+        if (p.playing) play(p.posQ)
+    }
+
+    /** Gera o áudio da partitura inteira (com repetições, dinâmicas e a mesa de som) e pede onde salvar. [format]: "wav" ou "m4a". */
+    var exporting by mutableStateOf(false)
+    fun exportAudio(format: String) {
+        val s = score ?: return
+        if (exporting) return
+        exporting = true; message = "Gerando o áudio… pode levar alguns segundos."
+        val snap = s.copyDeep(); val t = tempo; val v = volumes.map { it.toDouble() }; rebuildMix(); val mx = mix?.snapshot()
+        val base = s.title.replace(Regex("[^\\p{L}\\p{N} _-]"), "").trim().ifBlank { "partitura" }
+        val handler = Handler(Looper.getMainLooper())
+        thread {
+            try {
+                val pcm = Synth.render(snap, t, v, mix = mx)
+                val bytes = if (format == "m4a") AudioExport.m4a(pcm, Synth.RATE, app.cacheDir) else Synth.wavBytes(pcm)
+                handler.post { exporting = false; saveAs("$base.$format", bytes) }
+            } catch (e: Throwable) {
+                handler.post { exporting = false; message = "Não foi possível gerar o áudio: ${e.message}" }
+            }
+        }
     }
 
     fun toast(m: String) { message = m }

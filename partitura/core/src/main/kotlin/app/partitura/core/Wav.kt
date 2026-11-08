@@ -10,52 +10,47 @@ import kotlin.math.sin
 object Synth {
     const val RATE = 44100
 
-    class Event(val startSec: Double, val durSec: Double, val midi: Int, val part: Int)
+    class Event(val startSec: Double, val durSec: Double, val midi: Int, val part: Int, val vel: Int = 80, val voice: Int = 1, val mi: Int = 0)
 
-    fun events(s: Score, tempo: Int = s.tempo): List<Event> {
-        val sec = 60.0 / tempo / s.divisions
-        val ev = mutableListOf<Event>()
+    /**
+     * Notas com tempo em segundos. Respeita ritornelos/casas, dinâmicas (pp…ff, crescendo), rit./accel. e mudanças de andamento.
+     * [plain] ignora tudo isso (ordem natural, andamento fixo, intensidade padrão): usado para exportar MIDI e nos testes.
+     */
+    fun events(s: Score, tempo: Int = s.tempo, expand: Boolean = true, plain: Boolean = false): List<Event> =
+        events(s, Playlist.timeline(s, tempo, expand, plain))
+
+    fun events(s: Score, tl: Playlist.Timeline): List<Event> {
+        val ev = ArrayList<Event>()
         s.parts.forEachIndexed { pi, p ->
-            var t = 0
-            val voiceTime = HashMap<Int, Int>()
-            var lastStart = 0
             val open = HashMap<Int, Int>() // midi -> índice do evento ligado
-            for (m in p.measures) {
-                val mStart = t
-                voiceTime.clear()
+            var prevMi = -2
+            for ((k, pl) in tl.played.withIndex()) {
+                if (pl.mi != prevMi + 1) open.clear()
+                prevMi = pl.mi
+                val m = p.measures.getOrNull(pl.mi) ?: continue
+                val voiceTime = HashMap<Int, Int>()
+                var lastStart = 0
                 for (n in m.notes) {
-                    val start = if (n.chord) lastStart else mStart + (voiceTime[n.voice] ?: 0)
-                    if (!n.chord) { voiceTime[n.voice] = (voiceTime[n.voice] ?: 0) + n.duration; lastStart = start }
+                    val off = if (n.chord) lastStart else (voiceTime[n.voice] ?: 0)
+                    if (!n.chord) { voiceTime[n.voice] = off + n.duration; lastStart = off }
                     val pt = n.pitch ?: continue
+                    val st = tl.secIn(k, off.toDouble()); val en = tl.secIn(k, (off + n.duration).toDouble())
                     if (n.tieStop && open.containsKey(pt.midi)) {
                         val idx = open[pt.midi]!!; val old = ev[idx]
-                        ev[idx] = Event(old.startSec, old.durSec + n.duration * sec, old.midi, pi)
+                        ev[idx] = Event(old.startSec, en - old.startSec, old.midi, pi, old.vel, old.voice, old.mi)
                         if (!n.tieStart) open.remove(pt.midi)
                     } else {
-                        ev += Event(start * sec, n.duration * sec, pt.midi, pi)
+                        ev += Event(st, en - st, pt.midi, pi, tl.velocity(pi, (pl.startDiv + off).toDouble()), n.voice, pl.mi)
                         if (n.tieStart) open[pt.midi] = ev.size - 1
                     }
                 }
-                t = mStart + (voiceTime.values.maxOrNull() ?: 0)
             }
         }
         return ev
     }
 
-    /** Início de cada compasso (segundos); tamanho = compassos + 1. Usa a primeira parte. */
-    fun measureTimes(s: Score, tempo: Int = s.tempo): DoubleArray {
-        val sec = 60.0 / tempo / s.divisions
-        val part = s.parts.firstOrNull() ?: return doubleArrayOf(0.0)
-        val out = DoubleArray(part.measures.size + 1)
-        var t = 0
-        part.measures.forEachIndexed { i, m ->
-            out[i] = t * sec
-            val per = m.notes.filter { !it.chord }.groupBy { it.voice }.values.maxOfOrNull { l -> l.sumOf { it.duration } } ?: 0
-            t += per
-        }
-        out[part.measures.size] = t * sec
-        return out
-    }
+    /** Início de cada compasso (segundos, na primeira vez que soa); tamanho = compassos + 1 (o último é a duração total, com repetições). */
+    fun measureTimes(s: Score, tempo: Int = s.tempo, expand: Boolean = true): DoubleArray = Playlist.timeline(s, tempo, expand).measureStarts()
 
     /** Síntese em pedaços: o primeiro pedaço (1 s) fica pronto quase na hora, então o som começa sem espera mesmo em músicas longas. */
     class Prepared internal constructor(val total: Int, private val nextChunk: () -> ShortArray?) {
@@ -69,11 +64,43 @@ object Synth {
         return ((if (x < 0) -y else y) * 32767).toInt().coerceIn(-32768, 32767).toShort()
     }
 
-    fun prepare(s: Score, tempo: Int = s.tempo, volumes: List<Double> = emptyList(), fromSec: Double = 0.0, toSec: Double = Double.MAX_VALUE): Prepared {
-        val all = events(s, tempo).filter { it.startSec >= fromSec - 1e-6 && it.startSec < toSec }.sortedBy { it.startSec }
+    /** Reverberação de sala (Schroeder): dá corpo e tira o som seco/"amador". Mantém estado entre os pedaços. */
+    private class Room(wet: Double) {
+        private val w = wet
+        private val cd = intArrayOf(1557, 1617, 1491, 1422, 1277, 1356)
+        private val cb = Array(6) { DoubleArray(cd[it]) }; private val ci = IntArray(6); private val lp = DoubleArray(6)
+        private val ad = intArrayOf(556, 441, 341)
+        private val ab = Array(3) { DoubleArray(ad[it]) }; private val ai = IntArray(3)
+        fun process(x: DoubleArray, n: Int) {
+            for (i in 0 until n) {
+                val inp = x[i] * 0.3
+                var acc = 0.0
+                for (c in 0 until 6) {
+                    val d = cb[c][ci[c]]
+                    lp[c] = d * 0.72 + lp[c] * 0.28
+                    cb[c][ci[c]] = inp + lp[c] * 0.84
+                    if (++ci[c] >= cd[c]) ci[c] = 0
+                    acc += d
+                }
+                var y = acc * 0.28
+                for (a in 0 until 3) {
+                    val bv = ab[a][ai[a]]
+                    val out = -y + bv
+                    ab[a][ai[a]] = y + bv * 0.5
+                    if (++ai[a] >= ad[a]) ai[a] = 0
+                    y = out
+                }
+                x[i] += y * w
+            }
+        }
+    }
+
+    fun prepare(s: Score, tempo: Int = s.tempo, volumes: List<Double> = emptyList(), fromSec: Double = 0.0, toSec: Double = Double.MAX_VALUE, expand: Boolean = true, mix: Mix? = null): Prepared {
+        val all = events(s, tempo, expand).filter { it.startSec >= fromSec - 1e-6 && it.startSec < toSec }.sortedBy { it.startSec }
         val end = (all.maxOfOrNull { minOf(it.startSec + it.durSec, toSec) } ?: fromSec) + 1.0
         val total = ((end - fromSec) * RATE).toInt().coerceAtLeast(1)
         val timbres = s.parts.map { Timbre.of(it.inst) }
+        val room = Room(0.5)
         var pos = 0; var evIdx = 0
         var carry = DoubleArray(0)
         return Prepared(total) {
@@ -90,10 +117,17 @@ object Synth {
                 val buf = DoubleArray(maxOf(maxEnd, pos + carry.size) - pos)
                 System.arraycopy(carry, 0, buf, 0, carry.size)
                 for (e in sel) {
-                    val tb = timbres.getOrElse(e.part) { Timbre.PIANO }
                     val st = ((e.startSec - fromSec) * RATE).toInt().coerceAtLeast(0)
-                    renderNote(e, tb, volumes.getOrElse(e.part) { 1.0 } * 0.22 * tb.gain, buf, st - pos)
+                    if (mix == null) {
+                        val tb = timbres.getOrElse(e.part) { Timbre.PIANO }
+                        renderNote(e, tb, volumes.getOrElse(e.part) { 1.0 } * 0.22 * tb.gain, buf, st - pos)
+                    } else for (ti in mix.tracksFor(e.part, e.voice, e.mi)) {
+                        if (!mix.audible(ti)) continue
+                        val tb = Timbre.of(mix.timbreId(ti, s))
+                        renderNote(e, tb, mix.volume[ti] * volumes.getOrElse(e.part) { 1.0 } * 0.22 * tb.gain, buf, st - pos)
+                    }
                 }
+                room.process(buf, len)
                 val out = ShortArray(len) { softClip(buf[it]) }
                 carry = if (buf.size > len) buf.copyOfRange(len, buf.size) else DoubleArray(0)
                 pos = w1
@@ -102,55 +136,93 @@ object Synth {
         }
     }
 
-    fun render(s: Score, tempo: Int = s.tempo, volumes: List<Double> = emptyList(), fromSec: Double = 0.0, toSec: Double = Double.MAX_VALUE): ShortArray {
-        val p = prepare(s, tempo, volumes, fromSec, toSec)
+    fun render(s: Score, tempo: Int = s.tempo, volumes: List<Double> = emptyList(), fromSec: Double = 0.0, toSec: Double = Double.MAX_VALUE, expand: Boolean = true, mix: Mix? = null): ShortArray {
+        val p = prepare(s, tempo, volumes, fromSec, toSec, expand, mix)
         val out = ShortArray(p.total); var o = 0
         while (true) { val c = p.next() ?: break; System.arraycopy(c, 0, out, o, c.size); o += c.size }
         return out
     }
 
     /** Soma uma nota em [buf] a partir da amostra [s0] (pode ser negativa: nota que começou no pedaço anterior não ocorre, mas fica seguro). */
-    private fun renderNote(e: Event, tb: Timbre, vol: Double, buf: DoubleArray, s0: Int) {
+    private fun renderNote(e: Event, tb: Timbre, vol0: Double, buf: DoubleArray, s0: Int) {
         val f0 = 440.0 * 2.0.pow((e.midi - 69) / 12.0)
         val len = ((e.durSec + 0.5) * RATE).toInt()
         val relStart = ((e.durSec) * RATE).toInt()
-        // Osciladores por recorrência (rotação de fasor): muito mais rápido que sin/exp por amostra.
-        val nh = minOf(tb.nh, (9000.0 / f0).toInt().coerceAtLeast(1))
-        val cr = DoubleArray(nh); val ci = DoubleArray(nh); val re = DoubleArray(nh); val im = DoubleArray(nh)
-        val am = DoubleArray(nh); val dc = DoubleArray(nh)
+        val vol = vol0 * (e.vel / 80.0).pow(1.4)
+        val ns = tb.strings.coerceIn(1, 3)
+        val bri = ((e.vel / 127.0) / (80.0 / 127.0)).pow(tb.bright)        // >1 quando toca forte
+        val nh = minOf(tb.nh, (11000.0 / f0).toInt().coerceAtLeast(1))
+        val n = nh * ns
+        val cr = DoubleArray(n); val ci = DoubleArray(n); val re = DoubleArray(n); val im = DoubleArray(n)
+        val am = DoubleArray(n); val dc = DoubleArray(n); val fr = DoubleArray(n)
         val base = (1.2 + f0 / 900.0) * tb.decayScale
         var norm = 0.0
-        for (h in 0 until nh) norm += tb.amp(h + 1, f0)
-        val nrm = if (tb.sustained) 1.0 / maxOf(norm, 1e-6) * 2.2 else 1.0
+        val hamp = DoubleArray(nh)
         for (h in 0 until nh) {
-            val w = 2 * PI * f0 * (h + 1) / RATE
-            cr[h] = kotlin.math.cos(w); ci[h] = kotlin.math.sin(w); re[h] = 1.0; im[h] = 0.0
-            am[h] = tb.amp(h + 1, f0) * nrm
-            dc[h] = if (tb.sustained) 1.0 else exp(-(h * tb.harmDecay) / RATE)
+            val hf = f0 * (h + 1)
+            var a = tb.amp(h + 1, f0)
+            if (tb.strike > 0) a *= 0.35 + 0.65 * kotlin.math.abs(sin(PI * (h + 1) * tb.strike)).pow(0.7)
+            a /= kotlin.math.sqrt(1.0 + (hf / tb.fc).pow(4))
+            a *= bri.pow(h * 0.8).coerceAtMost(1.6)
+            hamp[h] = a; norm += a
+        }
+        val nrm = if (tb.sustained) 1.0 / maxOf(norm, 1e-6) * 2.2 else 1.0
+        for (si in 0 until ns) {
+            val dt = if (ns == 1) 0.0 else (si - (ns - 1) / 2.0) * tb.detune
+            val ratio = 2.0.pow(dt / 1200.0)
+            for (h in 0 until nh) {
+                val k = si * nh + h
+                val stretch = kotlin.math.sqrt(1.0 + tb.inharm * (h + 1.0) * (h + 1.0))
+                fr[k] = f0 * (h + 1) * stretch * ratio
+                val w = 2 * PI * fr[k] / RATE
+                cr[k] = kotlin.math.cos(w); ci[k] = kotlin.math.sin(w)
+                // fase inicial levemente diferente por corda evita somar tudo em fase (menos "buzina")
+                val ph = si * 1.7 + h * 0.31
+                re[k] = kotlin.math.cos(ph); im[k] = kotlin.math.sin(ph)
+                am[k] = hamp[h] * nrm / ns
+                dc[k] = if (tb.sustained) 1.0 else exp(-(h * tb.harmDecay * (1.0 + 0.25 * si)) / RATE)
+            }
         }
         val slow = exp(-base * 0.45 / RATE); val fast = exp(-base * 2.2 / RATE)
         var eS = 0.65; var eF = 0.35
         val relMul = exp(-tb.releaseRate / RATE)
         var rel = 1.0
         val atkLen = (tb.attack * RATE).toInt().coerceAtLeast(1)
+        var seed = (e.midi * 7919L + (e.startSec * 1000).toLong()) and 0x7fffffffL
+        var nz = 0.0
+        val vibOn = tb.vibrato > 0
+        val vibDepth = tb.vibrato / 1200.0 * kotlin.math.ln(2.0)
         for (i in 0 until len) {
             val idx = s0 + i
             if (idx >= buf.size) break
+            if (vibOn && i % 32 == 0) {
+                val t = i.toDouble() / RATE
+                val v = if (t < tb.vibDelay) 0.0 else sin(2 * PI * tb.vibRate * (t - tb.vibDelay)) * kotlin.math.min(1.0, (t - tb.vibDelay) / 0.4) * vibDepth
+                val mul = exp(v)
+                for (k in 0 until n) { val w = 2 * PI * fr[k] * mul / RATE; cr[k] = kotlin.math.cos(w); ci[k] = kotlin.math.sin(w) }
+            }
             var v = 0.0
-            for (h in 0 until nh) {
-                v += im[h] * am[h]
-                val nr = re[h] * cr[h] - im[h] * ci[h]; val ni = re[h] * ci[h] + im[h] * cr[h]
-                re[h] = nr; im[h] = ni
-                am[h] *= dc[h]
+            for (k in 0 until n) {
+                v += im[k] * am[k]
+                val nr = re[k] * cr[k] - im[k] * ci[k]; val ni = re[k] * ci[k] + im[k] * cr[k]
+                re[k] = nr; im[k] = ni
+                am[k] *= dc[k]
             }
             eS *= slow; eF *= fast
             if (i >= relStart) rel *= relMul
             if (idx >= 0) {
                 val atk = if (i < atkLen) i.toDouble() / atkLen else 1.0
                 val env = if (tb.sustained) 1.0 else (eS + eF)
-                buf[idx] += v * env * rel * atk * vol
+                var out = v * env * rel * atk
+                if (tb.hammer > 0 && i < 1800) {
+                    seed = (seed * 1103515245L + 12345L) and 0x7fffffffL
+                    val r = (seed / 1073741824.0) - 1.0
+                    nz = nz * 0.82 + r * 0.18               // ruído filtrado (grave): "toc" do martelo
+                    out += nz * tb.hammer * exp(-i / 260.0) * 0.9 * (0.4 + e.vel / 127.0) * (if (f0 < 500) 1.0 else 500.0 / f0)
+                }
+                buf[idx] += out * vol
             }
-            if (i % 4096 == 4095) for (h in 0 until nh) { val m = kotlin.math.sqrt(re[h] * re[h] + im[h] * im[h]); re[h] /= m; im[h] /= m }
+            if (i % 4096 == 4095) for (k in 0 until n) { val m = kotlin.math.sqrt(re[k] * re[k] + im[k] * im[k]); re[k] /= m; im[k] /= m }
         }
     }
 

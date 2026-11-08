@@ -119,7 +119,7 @@ fun CreativeScreen(state: AppState) {
         if (sc != null && arranged != null) {
             Panel {
                 Text("Prévia", style = MaterialTheme.typography.titleMedium)
-                StaticScore(arranged, ver * 1000 + piano.hashCode() + voices.hashCode() + (if (voiceLyrics) 1 else 0) + sc.parts[0].measures.sumOf { it.harmony.sumOf { h -> h.rootPc + h.kind.length } }, maxHeight = 420.dp, q = { if (p.active) p.posSec * p.usedTempo / 60.0 else null })
+                StaticScore(arranged, ver * 1000 + piano.hashCode() + voices.hashCode() + (if (voiceLyrics) 1 else 0) + sc.parts[0].measures.sumOf { it.harmony.sumOf { h -> h.rootPc + h.kind.length } }, maxHeight = 420.dp, q = { if (p.active) p.posQ else null })
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Button(onClick = { if (p.active) p.stop() else p.start(arranged, arranged.tempo, List(arranged.parts.size) { 1.0 }, 0.0, Double.MAX_VALUE, false) }) { Text(if (p.active) "Parar" else "Ouvir") }
                     Text("${sc.parts[0].measures.size} compassos · ${arranged.parts.size} pautas", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -24,7 +24,7 @@ object Transpose {
         val out = score.copy(fifths = newFifths, parts = mutableListOf())
         for (p in score.parts) {
             val np = Part(p.id, p.name, mutableListOf(), p.clef, p.group, p.inst)
-            for (m in p.measures) np.measures += Measure(m.number, m.notes.map { n ->
+            for (m in p.measures) np.measures += m.dup().also { it.notes.clear(); it.harmony.clear(); it.fifths = m.fifths?.let { f -> var g = f + 7 * semitones; while (g > 6) g -= 12; while (g < -6) g += 12; g } }.let { base -> Measure(m.number, m.notes.map { n ->
                 val pt = n.pitch ?: return@map n
                 // desloca na linha das quintas pelo equivalente a semitons (7 quintas por semitom, mod 12)
                 var f = fifthsOf(pt) + 7 * semitones
@@ -38,7 +38,7 @@ object Transpose {
                 val r = Spell.forMidi(60 + h.rootPc + semitones, newFifths)
                 val b = h.bassStep?.let { Spell.forMidi(60 + h.bassPc + semitones, newFifths) }
                 h.copy(step = r.step, alter = r.alter, bassStep = b?.step, bassAlter = b?.alter ?: 0)
-            }.toMutableList())
+            }.toMutableList(), base.dyn, base.tempo, base.fifths, base.beats, base.beatType, base.repeatStart, base.repeatEnd, base.volta, base.rit, base.clef, base.mark) }
             out.parts += np
         }
         return out

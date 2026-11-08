@@ -156,7 +156,7 @@ fun TheoryScreen(state: AppState, wide: Boolean) {
     val activeMidi by remember(ev) {
         derivedStateOf { if (!p.active) emptySet<Int>() else { val t = p.posSec; ev.filter { it.startSec <= t + 1e-6 && t < it.startSec + it.durSec }.map { it.midi }.toSet() } }
     }
-    val qNow: () -> Double? = { if (p.active) p.posSec * p.usedTempo / 60.0 else null }
+    val qNow: () -> Double? = { if (p.active) p.posQ else null }
     var marks by remember { mutableStateOf(emptySet<Int>()) }   // classes de altura (0..11) realçadas no piano
 
     Column(Modifier.fillMaxSize()) {

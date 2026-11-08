@@ -54,7 +54,7 @@ fun TransposeScreen(state: AppState) {
         }
 
         SectionTitle("Prévia")
-        StaticScore(preview, rev * 100 + semis + 50, maxHeight = 320.dp, q = { if (p.active) p.posSec * p.usedTempo / 60.0 else null })
+        StaticScore(preview, rev * 100 + semis + 50, maxHeight = 320.dp, q = { if (p.active) p.posQ else null })
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             Button(

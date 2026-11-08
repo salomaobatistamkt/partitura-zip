@@ -90,7 +90,8 @@ fun Root(state: AppState) {
     state.goServer = { tab = 6 }
     state.goHome = { tab = 0 }
     LaunchedEffect(state.message) { state.message?.let { snack.showSnackbar(it); state.message = null } }
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    // respeita a barra de status (relógio/bateria), a barra de gestos e o recorte da tela: nada fica por baixo deles
+    BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
         val wide = maxWidth >= 720.dp
         val full = maxWidth >= 980.dp
         val content: @Composable () -> Unit = {

@@ -19,7 +19,7 @@ import androidx.compose.ui.unit.dp
 import app.partitura.core.*
 
 private val METERS = listOf(4 to 4, 3 to 4, 6 to 8, 2 to 4)
-private val MODES = listOf("Fiel: piano em 2 pautas", "Melodia + cifras", "Melodia + cifras + acompanhamento")
+private val MODES = listOf("Piano completo (Sol + Fá)", "Só a melodia + cifras", "Melodia + cifras + acompanhamento novo")
 
 /** Aba Ouvir: toca no microfone ou importa um áudio → notas → partitura. Tudo no aparelho, sem rede. */
 @OptIn(ExperimentalLayoutApi::class)
@@ -38,7 +38,7 @@ fun ListenScreen(state: AppState) {
     var error by remember { mutableStateOf<String?>(null) }
 
     var title by rememberSaveable { mutableStateOf("Gravação") }
-    var mode by rememberSaveable { mutableIntStateOf(1) }
+    var mode by rememberSaveable { mutableIntStateOf(0) }
     var meter by rememberSaveable { mutableIntStateOf(0) }
     var tempoText by rememberSaveable { mutableStateOf("") }
     var keyAuto by rememberSaveable { mutableStateOf(true) }
@@ -134,10 +134,15 @@ fun ListenScreen(state: AppState) {
         Panel {
             Text("Como montar a partitura", style = MaterialTheme.typography.titleMedium)
             OutlinedTextField(title, { title = it }, label = { Text("Título") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            SectionTitle("Resultado")
+            SectionTitle("O que montar")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 MODES.forEachIndexed { i, n -> FilterChip(selected = mode == i, onClick = { mode = i }, label = { Text(n) }) }
             }
+            Text(when (mode) {
+                0 -> "Escreve tudo o que foi ouvido em duas pautas, como no piano: mão direita na clave de Sol e mão esquerda na clave de Fá. Escolha esta quando a gravação for de piano (melodia + acompanhamento)."
+                1 -> "Escreve só a linha principal (a nota mais aguda de cada instante), com as cifras estimadas. Boa para voz ou instrumento solo."
+                else -> "Escreve a melodia e cria um acompanhamento de piano novo a partir das cifras (não é o que foi tocado)."
+            }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             SectionTitle("Compasso")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 METERS.forEachIndexed { i, (b, t) -> FilterChip(selected = meter == i, onClick = { meter = i }, label = { Text("$b/$t") }) }

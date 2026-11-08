@@ -52,14 +52,12 @@ fun FilesScreen(state: AppState) {
                     Wrap {
                         Button(onClick = { state.saveAs("$base.musicxml", MusicXml.write(s).toByteArray()) }) { Text("MusicXML") }
                         Button(onClick = { state.saveAs("$base.mid", Midi.export(s)) }) { Text("MIDI") }
-                        Button(enabled = !busy, onClick = {
-                            busy = true; val snap = s.copyDeep(); val t = state.tempo; val v = state.volumes.map { it.toDouble() }
-                            thread { val w = Synth.wavBytes(Synth.render(snap, t, v)); android.os.Handler(android.os.Looper.getMainLooper()).post { busy = false; state.saveAs("$base.wav", w) } }
-                        }) { Text(if (busy) "Gerando áudio…" else "WAV (áudio)") }
+                        Button(enabled = !state.exporting, onClick = { state.exportAudio("wav") }) { Text(if (state.exporting) "Gerando áudio…" else "Áudio WAV") }
+                        Button(enabled = !state.exporting, onClick = { state.exportAudio("m4a") }) { Text("Áudio M4A (menor)") }
                         Button(onClick = { state.saveAs("$base.png", renderPng(s)) }) { Text("PNG") }
                         Button(onClick = { state.saveAs("$base.pdf", renderPdf(s)) }) { Text("PDF") }
                     }
-                    Text("O WAV usa o andamento e os volumes do Estúdio (${state.tempo} bpm). MP3 ainda não está disponível.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("O áudio usa o andamento, as repetições, as dinâmicas e a mesa de som do Estúdio (${state.tempo} bpm): você pode tirar vozes, trocar o timbre e baixar só o que precisa. WAV tem a melhor qualidade; M4A é bem menor e abre em qualquer celular. MP3 não está disponível (o Android não traz codificador de MP3).", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }

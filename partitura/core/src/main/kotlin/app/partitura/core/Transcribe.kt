@@ -22,7 +22,7 @@ class TranscribeOptions(
     /** segundo em que o compasso 1 começa; null = primeira nota */
     val downbeat: Double? = null,
     /** 0 = fiel (piano, 2 pautas, todas as notas); 1 = melodia + acordes; 2 = melodia + acordes + acompanhamento de piano */
-    val mode: Int = 1,
+    val mode: Int = 0,
     val pianoStyle: String = "balada",
     val instrument: String = "piano",
     /** notas mais curtas que isto (s) são descartadas */
@@ -250,8 +250,17 @@ object ScoreFromNotes {
                 }
                 return segs
             }
-            s.parts += partFrom(cluster(q.filter { it.midi >= 60 }), "P1", "Piano (pauta 1)", 'G', "piano")
-            s.parts += Part("P1-2", "Piano (pauta 2)", measuresFrom(cluster(q.filter { it.midi < 60 }), barStarts, barEnd, o.beats, o.beatType, key), 'F', "P1", "piano")
+            // ponto de divisão entre as mãos: o "vale" de menos notas perto do dó central (evita cortar uma melodia no meio)
+            val mass = DoubleArray(128)
+            for (n in q) mass[n.midi] += (n.e - n.s).toDouble()
+            var split = 60; var bestCost = Double.MAX_VALUE
+            for (sp in 55..64) {
+                val cost = mass[sp - 1] + mass[sp] + 0.6 * (mass[sp - 2] + mass[sp + 1]) + 0.35 * Math.abs(sp - 60) * (mass.sum() / 400.0)
+                if (cost < bestCost - 1e-9) { bestCost = cost; split = sp }
+            }
+            val rh = q.filter { it.midi >= split }; val lh = q.filter { it.midi < split }
+            s.parts += partFrom(cluster(rh), "P1", "Piano (pauta 1)", 'G', "piano")
+            s.parts += Part("P1-2", "Piano (pauta 2)", measuresFrom(cluster(lh), barStarts, barEnd, o.beats, o.beatType, key), 'F', "P1", "piano")
         } else {
             val sky = skyline()
             val avg = sky.map { it.p[0] }.average()

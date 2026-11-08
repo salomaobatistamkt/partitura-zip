@@ -57,13 +57,13 @@ fun ConductScreen(state: AppState) {
 
     val phaseNow: () -> Double = {
         when {
-            p.active -> pattern.phaseAtQuarters(p.posSec * p.usedTempo / 60.0 + (if (p.kind == "music") offsetQ else 0.0))
+            p.active -> pattern.phaseAtQuarters(p.posQ + (if (p.kind == "music") offsetQ else 0.0))
             anim -> pattern.phaseAtQuarters(freeQ)
             else -> -1.0
         }
     }
     val curBeat by remember(pattern) { derivedStateOf { val ph = phaseNow(); if (ph < 0) -1 else Math.floorMod(floor(ph).toInt(), pattern.beats) } }
-    val curMeasure by remember(pattern) { derivedStateOf { if (p.active && p.kind == "music") floor((p.posSec * p.usedTempo / 60.0 + offsetQ) / measQ).toInt() + 1 else -1 } }
+    val curMeasure by remember(pattern) { derivedStateOf { if (p.active && p.kind == "music") floor((p.posQ + offsetQ) / measQ).toInt() + 1 else -1 } }
 
     LaunchedEffect(anim, pattern) {
         if (anim) {

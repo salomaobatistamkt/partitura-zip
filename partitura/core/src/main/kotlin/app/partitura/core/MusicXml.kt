@@ -44,6 +44,7 @@ object MusicXml {
         for (p in s.parts) for (m in p.measures) {
             for (i in m.notes.indices) m.notes[i] = m.notes[i].copy(duration = m.notes[i].duration * f)
             for (i in m.harmony.indices) m.harmony[i] = m.harmony[i].copy(at = m.harmony[i].at * f)
+            for (i in m.dyn.indices) m.dyn[i] = m.dyn[i].copy(at = m.dyn[i].at * f)
         }
         return s
     }
@@ -88,7 +89,9 @@ object MusicXml {
         val title = root.kid("work")?.text("work-title")?.takeIf { it.isNotBlank() } ?: root.text("movement-title")?.takeIf { it.isNotBlank() } ?: "Sem título"
         val score = Score(title, 1, 0, 4, 4, 100)
         var gotKey = false; var gotTime = false; var gotTempo = false; var gotDiv = false
+        val DYN_MARKS = setOf("pppp", "ppp", "pp", "p", "mp", "mf", "f", "ff", "fff", "ffff", "sf", "sfz", "fp", "rfz", "sffz", "fz")
         for (p in root.kids("part")) {
+            var curFifths = score.fifths; var curBeats = score.beats; var curBeatType = score.beatType; var curTempo = score.tempo; var curVolta = 0
             val id = p.getAttribute("id")
             val pname = names[id] ?: id
             val timbre = programs[id]?.let { Instruments.timbreForProgram(it) } ?: Instruments.timbreForName(pname)
@@ -107,6 +110,7 @@ object MusicXml {
                 var curStaff = 1
                 var lastVoice = 1
                 var tpos = 0
+                var voltaStart = 0; var voltaStop = false
                 val els = (0 until m.childNodes.length).map { m.childNodes.item(it) }.filterIsInstance<Element>()
                 for (n in els) {
                     when (n.tagName) {
@@ -115,19 +119,63 @@ object MusicXml {
                             n.text("staves")?.toIntOrNull()?.let { declaredStaves = maxOf(declaredStaves, minOf(it, 4)); for (i in 1..declaredStaves) staffPart(i) }
                             for (c in n.kids("clef")) {
                                 val sn = c.getAttribute("number").toIntOrNull() ?: 1
-                                if (sn in clefSet) continue
+                                if (sn in clefSet) {
+                                    val sg = c.text("sign")?.firstOrNull()
+                                    if (sg != null && mIndex > 1) meas(sn).clef = when (sg) { 'F' -> 'F'; 'C' -> 'C'; else -> 'G' }
+                                    continue
+                                }
                                 val sign = c.text("sign")?.firstOrNull() ?: continue
                                 staffPart(sn).clef = when (sign) { 'F' -> 'F'; 'G' -> 'G'; else -> if (staffPart(sn).clef == 'F') 'F' else 'G' }
                                 clefSet += sn
                             }
-                            if (!gotKey) n.kid("key")?.text("fifths")?.toIntOrNull()?.let { score.fifths = it; gotKey = true }
-                            if (!gotTime) n.kid("time")?.let { t ->
+                            n.kid("key")?.text("fifths")?.toIntOrNull()?.let { f ->
+                                if (!gotKey) { score.fifths = f; gotKey = true; curFifths = f } else if (f != curFifths) { meas(1).fifths = f; curFifths = f }
+                            }
+                            n.kid("time")?.let { t ->
                                 val b = t.text("beats")?.toIntOrNull(); val bt = t.text("beat-type")?.toIntOrNull()
-                                if (b != null && bt != null) { score.beats = b; score.beatType = bt; gotTime = true }
+                                if (b != null && bt != null) {
+                                    if (!gotTime) { score.beats = b; score.beatType = bt; gotTime = true; curBeats = b; curBeatType = bt }
+                                    else if (b != curBeats || bt != curBeatType) { meas(1).beats = b; meas(1).beatType = bt; curBeats = b; curBeatType = bt }
+                                }
                             }
                         }
-                        "direction" -> if (!gotTempo) n.kid("sound")?.getAttribute("tempo")?.toDoubleOrNull()?.let { score.tempo = it.toInt().coerceIn(20, 300); gotTempo = true }
-                        "sound" -> if (!gotTempo) n.getAttribute("tempo").toDoubleOrNull()?.let { score.tempo = it.toInt().coerceIn(20, 300); gotTempo = true }
+                        "direction", "sound" -> {
+                            val snd = if (n.tagName == "sound") n else n.kid("sound")
+                            snd?.getAttribute("tempo")?.toDoubleOrNull()?.let { v0 ->
+                                val v = v0.toInt().coerceIn(20, 300)
+                                if (!gotTempo) { score.tempo = v; gotTempo = true; curTempo = v } else if (v != curTempo) { meas(1).tempo = v; curTempo = v }
+                            }
+                            if (n.tagName == "direction") {
+                                val off = n.text("offset")?.toIntOrNull() ?: 0
+                                val dst = (n.text("staff")?.toIntOrNull() ?: 1).coerceIn(1, 4)
+                                for (dt in n.kids("direction-type")) {
+                                    dt.kid("dynamics")?.let { d ->
+                                        val mk = (0 until d.childNodes.length).map { d.childNodes.item(it) }.filterIsInstance<Element>().firstOrNull()?.tagName
+                                        if (mk != null && mk in DYN_MARKS) { staffPart(dst); meas(dst).dyn += Dyn((tpos + off).coerceAtLeast(0), mk) }
+                                    }
+                                    dt.kid("wedge")?.let { w ->
+                                        val k = when (w.getAttribute("type")) { "crescendo" -> "cresc"; "diminuendo" -> "dim"; "stop" -> "end"; else -> null }
+                                        if (k != null) { staffPart(dst); meas(dst).dyn += Dyn((tpos + off).coerceAtLeast(0), k) }
+                                    }
+                                    dt.kid("words")?.textContent?.trim()?.lowercase()?.let { w ->
+                                        when {
+                                            w.startsWith("poco rit") || w.startsWith("poco rall") -> meas(1).rit = -12
+                                            w.startsWith("rit") || w.startsWith("rall") -> meas(1).rit = -22
+                                            w.startsWith("accel") -> meas(1).rit = 15
+                                            w.startsWith("cresc") -> { staffPart(dst); meas(dst).dyn += Dyn((tpos + off).coerceAtLeast(0), "cresc") }
+                                            w.startsWith("dim") || w.startsWith("decresc") -> { staffPart(dst); meas(dst).dyn += Dyn((tpos + off).coerceAtLeast(0), "dim") }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        "barline" -> {
+                            n.kid("repeat")?.getAttribute("direction")?.let { d -> if (d == "forward") meas(1).repeatStart = true else if (d == "backward") meas(1).repeatEnd = true }
+                            n.kid("ending")?.let { e ->
+                                val num = e.getAttribute("number").takeWhile { it.isDigit() }.toIntOrNull() ?: 1
+                                when (e.getAttribute("type")) { "start" -> voltaStart = num; "stop", "discontinue" -> voltaStop = true }
+                            }
+                        }
                         "forward" -> {
                             val d = n.text("duration")?.toIntOrNull() ?: 0
                             val st = n.text("staff")?.toIntOrNull() ?: curStaff
@@ -173,7 +221,15 @@ object MusicXml {
                         }
                     }
                 }
-                for (i in staves.keys.toList()) staves[i]!!.measures += (ms[i] ?: Measure(num))
+                if (voltaStart > 0) curVolta = voltaStart
+                if (curVolta > 0) meas(1).volta = curVolta
+                if (voltaStop) curVolta = 0
+                val m1 = ms[1]
+                for (i in staves.keys.toList()) {
+                    val mm = ms[i] ?: Measure(num)
+                    if (i != 1 && m1 != null) { mm.tempo = m1.tempo; mm.fifths = m1.fifths; mm.beats = m1.beats; mm.beatType = m1.beatType; mm.repeatStart = m1.repeatStart; mm.repeatEnd = m1.repeatEnd; mm.volta = m1.volta; mm.rit = m1.rit }
+                    staves[i]!!.measures += mm
+                }
             }
             val multi = staves.size > 1
             for ((i, part) in staves) {
@@ -205,6 +261,29 @@ object MusicXml {
             val nMeas = g.maxOf { it.measures.size }
             for (i in 0 until nMeas) {
                 sb.append("    <measure number=\"${g[0].measures.getOrNull(i)?.number ?: (i + 1)}\">\n")
+                val gm = g[0].measures.getOrNull(i)
+                if (gm != null) {
+                    val prevV = g[0].measures.getOrNull(i - 1)?.volta ?: 0
+                    if (gm.repeatStart || (gm.volta > 0 && gm.volta != prevV)) {
+                        sb.append("      <barline location=\"left\">")
+                        if (gm.repeatStart) sb.append("<bar-style>heavy-light</bar-style>")
+                        if (gm.volta > 0 && gm.volta != prevV) sb.append("<ending number=\"${gm.volta}\" type=\"start\"/>")
+                        if (gm.repeatStart) sb.append("<repeat direction=\"forward\"/>")
+                        sb.append("</barline>\n")
+                    }
+                    if (i > 0 && (gm.fifths != null || gm.beats != null || g.any { it.measures.getOrNull(i)?.clef != null })) {
+                        sb.append("      <attributes>")
+                        gm.fifths?.let { sb.append("<key><fifths>$it</fifths></key>") }
+                        if (gm.beats != null && gm.beatType != null) sb.append("<time><beats>${gm.beats}</beats><beat-type>${gm.beatType}</beat-type></time>")
+                        g.forEachIndexed { k, pt -> pt.measures.getOrNull(i)?.clef?.let { c ->
+                            val num = if (g.size > 1) " number=\"${k + 1}\"" else ""
+                            sb.append(when (c) { 'F' -> "<clef$num><sign>F</sign><line>4</line></clef>"; 'C' -> "<clef$num><sign>C</sign><line>3</line></clef>"; else -> "<clef$num><sign>G</sign><line>2</line></clef>" })
+                        } }
+                        sb.append("</attributes>\n")
+                    }
+                    if (i > 0 && gm.tempo != null) sb.append("      <direction><sound tempo=\"${gm.tempo}\"/></direction>\n")
+                    if (gm.rit != 0) sb.append("      <direction><direction-type><words>${if (gm.rit < 0) (if (gm.rit > -15) "poco rit." else "rit.") else "accel."}</words></direction-type></direction>\n")
+                }
                 if (i == 0) {
                     sb.append("      <attributes><divisions>${s.divisions}</divisions><key><fifths>${s.fifths}</fifths></key><time><beats>${s.beats}</beats><beat-type>${s.beatType}</beat-type></time>")
                     if (g.size > 1) sb.append("<staves>${g.size}</staves>")
@@ -213,6 +292,16 @@ object MusicXml {
                         sb.append(if (pt.clef == 'F') "<clef$num><sign>F</sign><line>4</line></clef>" else "<clef$num><sign>G</sign><line>2</line></clef>")
                     }
                     sb.append("</attributes>\n      <direction><sound tempo=\"${s.tempo}\"/></direction>\n")
+                }
+                g.forEachIndexed { k, pt ->
+                    for (d in pt.measures.getOrNull(i)?.dyn ?: emptyList()) {
+                        val st = if (g.size > 1) "<staff>${k + 1}</staff>" else ""
+                        val inner = when (d.mark) {
+                            "cresc" -> "<wedge type=\"crescendo\"/>"; "dim" -> "<wedge type=\"diminuendo\"/>"; "end" -> "<wedge type=\"stop\"/>"
+                            else -> "<dynamics><${d.mark}/></dynamics>"
+                        }
+                        sb.append("      <direction placement=\"below\"><direction-type>$inner</direction-type>${if (d.at != 0) "<offset>${d.at}</offset>" else ""}$st</direction>\n")
+                    }
                 }
                 // blocos (pauta, voz): cada bloco volta ao início do compasso com <backup>
                 val blocks = ArrayList<Pair<Int, List<Note>>>()
@@ -259,6 +348,17 @@ object MusicXml {
                     if (bi < blocks.size - 1) {
                         val total = notes.filter { !it.chord }.sumOf { it.duration }
                         if (total > 0) sb.append("      <backup><duration>$total</duration></backup>\n")
+                    }
+                }
+                if (gm != null) {
+                    val nextV = g[0].measures.getOrNull(i + 1)?.volta ?: 0
+                    val endV = gm.volta > 0 && nextV != gm.volta
+                    if (gm.repeatEnd || endV) {
+                        sb.append("      <barline location=\"right\">")
+                        if (gm.repeatEnd) sb.append("<bar-style>light-heavy</bar-style>")
+                        if (endV) sb.append("<ending number=\"${gm.volta}\" type=\"${if (gm.repeatEnd) "stop" else "discontinue"}\"/>")
+                        if (gm.repeatEnd) sb.append("<repeat direction=\"backward\"/>")
+                        sb.append("</barline>\n")
                     }
                 }
                 sb.append("    </measure>\n")

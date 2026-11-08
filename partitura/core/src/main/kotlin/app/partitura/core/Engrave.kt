@@ -114,7 +114,13 @@ object Engrave {
 
     private fun space(q: Double) = (1.9 + 2.1 * sqrt(max(q, 0.125))).toFloat()
 
-    private class MeasureCol(val len: Int, val onsets: List<Int>, val rel: List<Float>, val width: Float)
+    private class MeasureCol(val len: Int, val onsets: List<Int>, val rel: List<Float>, val width: Float, val preSig: Float = 0f, val preRep: Float = 0f, val post: Float = 0f)
+
+    private val DYN_CODE = mapOf('p' to 0xE520, 'm' to 0xE521, 'f' to 0xE522, 'r' to 0xE523, 's' to 0xE524, 'z' to 0xE525)
+    private val DYN_ADV = mapOf('p' to 1.75f, 'm' to 2.4f, 'f' to 1.6f, 'r' to 1.5f, 's' to 1.15f, 'z' to 1.35f)
+    const val FERMATA = 0xE4C0
+
+    private class Hair(val sys: Int, val m: Int, val x: Float, val part: Int, val cresc: Boolean) { var sys2 = -1; var x2 = 0f }
 
     fun build(s: Score, widthSp: Float): Scene {
         val items = ArrayList<Item>()
@@ -135,6 +141,28 @@ object Engrave {
             measStartQ[pi][nMeasures] = t / div
         }
         val colQ = DoubleArray(nMeasures + 1) { i -> measStartQ[0][i] }
+        // armadura, fórmula de compasso e clave em vigor em cada compasso (mudam no meio da peça)
+        val keyAt = IntArray(nMeasures); val beatsAt = IntArray(nMeasures); val btAt = IntArray(nMeasures)
+        val clefAt = Array(s.parts.size) { CharArray(nMeasures) }
+        run {
+            var k = s.fifths; var bb = s.beats; var bt = s.beatType
+            val cl = CharArray(s.parts.size) { s.parts[it].clef }
+            for (m in 0 until nMeasures) {
+                s.parts.firstNotNullOfOrNull { it.measures.getOrNull(m)?.fifths }?.let { k = it }
+                val nb = s.parts.firstNotNullOfOrNull { it.measures.getOrNull(m)?.beats }
+                if (nb != null) { bb = nb; bt = s.parts.firstNotNullOfOrNull { it.measures.getOrNull(m)?.beatType } ?: bt }
+                keyAt[m] = k; beatsAt[m] = bb; btAt[m] = bt
+                for (pi in s.parts.indices) { s.parts[pi].measures.getOrNull(m)?.clef?.let { cl[pi] = it }; clefAt[pi][m] = cl[pi] }
+            }
+        }
+        fun repStartAt(m: Int) = s.parts.any { it.measures.getOrNull(m)?.repeatStart == true }
+        fun repEndAt(m: Int) = s.parts.any { it.measures.getOrNull(m)?.repeatEnd == true }
+        fun voltaAt(m: Int) = s.parts.firstNotNullOfOrNull { it.measures.getOrNull(m)?.volta?.takeIf { v -> v > 0 } } ?: 0
+        fun keyChange(m: Int) = m > 0 && keyAt[m] != keyAt[m - 1]
+        fun tsChange(m: Int) = m > 0 && (beatsAt[m] != beatsAt[m - 1] || btAt[m] != btAt[m - 1])
+        fun clefChange(m: Int) = m > 0 && s.parts.indices.any { clefAt[it][m] != clefAt[it][m - 1] }
+        fun naturalsN(prev: Int, k: Int) = if (prev == 0) 0 else if (k == 0 || (prev > 0) != (k > 0)) abs(prev) else if (abs(k) < abs(prev)) abs(prev) - abs(k) else 0
+        fun hasText(m: Int) = s.parts.any { p -> p.measures.getOrNull(m)?.let { it.tempo != null || it.rit != 0 } == true }
         // colunas de compasso: grade de tempos compartilhada por todas as pautas
         val cols = ArrayList<MeasureCol>()
         for (mi in 0 until nMeasures) {
@@ -145,12 +173,13 @@ object Engrave {
             for (pi in s.parts.indices) {
                 val mm = s.parts[pi].measures.getOrNull(mi)
                 mm?.harmony?.forEach { h -> val at = h.at.coerceIn(0, len - 1); on += at; need[at] = max(need[at] ?: 0f, textWidth(h.text(), CHORD_SIZE) + 0.7f) }
+                mm?.dyn?.forEach { d -> val at = d.at.coerceIn(0, len - 1); on += at; if (d.mark != "end" && d.mark != "cresc" && d.mark != "dim") need[at] = max(need[at] ?: 0f, d.mark.sumOf { c -> (DYN_ADV[c] ?: 1.4f).toDouble() }.toFloat() + 0.4f) }
                 for (e in evs[pi][mi]) {
                     if (e.rest) continue
                     val ly = mm?.notes?.getOrNull(e.heads[0].idx)?.let { lyricShown(it) } ?: continue
                     need[e.onset] = max(need[e.onset] ?: 0f, textWidth(ly, LYRIC_SIZE) + 0.5f)
                 }
-                val keyState = HashMap<Char, Int>().also { st -> Pitch.STEPS.forEach { st[it] = Spell.keyAlter(s.fifths, it) } }
+                val keyState = HashMap<Char, Int>().also { st -> Pitch.STEPS.forEach { st[it] = Spell.keyAlter(keyAt[mi], it) } }
                 for (e in evs[pi][mi]) {
                     on += e.onset
                     for (h in e.heads) { val pt = h.pitch ?: continue
@@ -158,17 +187,20 @@ object Engrave {
                 }
             }
             val list = on.toList()
+            val preSig = (if (keyChange(mi)) (naturalsN(keyAt[mi - 1], keyAt[mi]) + abs(keyAt[mi])) * 1.15f + 0.7f else 0f) +
+                (if (tsChange(mi)) 2.6f else 0f) + (if (clefChange(mi)) 3.4f else 0f)
+            val preRep = if (repStartAt(mi)) 1.9f else 0f
+            val post = if (repEndAt(mi)) 1.9f else 0f
             val rel = ArrayList<Float>()
-            var x = 1.4f
+            var x = 1.4f + preSig + preRep
             for ((k, o) in list.withIndex()) {
                 val next = list.getOrNull(k + 1) ?: len
                 rel += x + (if (accAt[o] == true) 1.2f else 0f)
                 x += max(space((next - o) / div), need[o] ?: 0f) + (if (accAt[o] == true) 1.2f else 0f)
             }
-            cols += MeasureCol(len, list, rel, max(x + 0.2f, 7f))
+            cols += MeasureCol(len, list, rel, max(x + 0.2f, 7f + preSig + preRep) + post, preSig, preRep, post)
         }
         val clefW = 3.6f
-        val keyW = abs(s.fifths) * 1.15f + (if (s.fifths != 0) 0.8f else 0.2f)
         val timeW = 2.8f
         val leftMargin = 2.4f // espaço da chave/colchete
         val groups = ArrayList<MutableList<Int>>()
@@ -180,24 +212,32 @@ object Engrave {
         val groupGap = 11f
         val sysGap = 5f
         var y = 4f
-        var maxX = widthSp
         val systems = ArrayList<SSystem>()
+        val sysMx0 = ArrayList<Float>(); val sysXEnd = ArrayList<Float>(); val sysPartY = ArrayList<Map<Int, Float>>()
+        val msys = IntArray(nMeasures); val mcx = FloatArray(nMeasures); val mmw = FloatArray(nMeasures)
+        val mAbsX = arrayOfNulls<List<Float>>(nMeasures)
+        val hairs = ArrayList<Hair>()
+        val openHair = arrayOfNulls<Hair>(s.parts.size)
         var mi = 0
         var sysNo = 0
         if (nMeasures == 0) return Scene(emptyList(), widthSp, 10f, emptyList(), emptyList())
         while (mi < nMeasures) {
             val first = sysNo == 0
-            val headW = clefW + keyW + (if (first) timeW else 0f)
+            val keyW = abs(keyAt[mi]) * 1.15f + (if (keyAt[mi] != 0) 0.8f else 0.2f)
+            val tsHeader = first || tsChange(mi)
+            val headW = clefW + keyW + (if (tsHeader) timeW else 0f)
             val x0 = leftMargin
             val availAll = widthSp - 1.5f - x0 - headW
+            fun wOf(m: Int, firstOfSys: Boolean) = cols[m].width - (if (firstOfSys) cols[m].preSig else 0f)
             var end = mi; var w = 0f
-            while (end < nMeasures && (end == mi || w + cols[end].width <= availAll)) { w += cols[end].width; end++ }
+            while (end < nMeasures && (end == mi || w + wOf(end, false) <= availAll)) { w += wOf(end, end == mi); end++ }
             val last = end >= nMeasures
             val factor = if (last) min(availAll / w, 1.35f).coerceAtLeast(0.6f).let { if (w < availAll * 0.6f) 1f.coerceAtLeast(it.coerceAtMost(1.25f)) else it } else availAll / w
             val sysTopY = y
+            val topPad = if ((mi until end).any { voltaAt(it) > 0 || hasText(it) }) 5.2f else 3f
             // posições y das pautas
             val staffTops = ArrayList<Float>()
-            var yy = sysTopY + 3f
+            var yy = sysTopY + topPad
             val groupSpans = ArrayList<Pair<Float, Float>>()
             for ((gi, g) in groups.withIndex()) {
                 val gTop = yy
@@ -217,25 +257,26 @@ object Engrave {
             val xEnd = mx0 + w * factor
             for ((pi, p) in s.parts.withIndex()) {
                 val top = partY[pi]!!
+                val clef = clefAt[pi][mi]
                 for (l in 0..4) items += Line(x0, top + l, xEnd, top + l, 0.13f)
-                val clefCode = if (p.clef == 'F') CLEF_F else CLEF_G
-                val clefPos = if (p.clef == 'F') 6 else 2
+                val clefCode = if (clef == 'F') CLEF_F else CLEF_G
+                val clefPos = if (clef == 'F') 6 else 2
                 items += Glyph(clefCode, x0 + 0.6f, top + (8 - clefPos) / 2f)
                 var kx = x0 + clefW
-                for (pos in Layout.keySigPositions(p.clef, s.fifths)) {
-                    items += Glyph(if (s.fifths > 0) SHARP else FLAT, kx, top + (8 - pos) / 2f); kx += 1.15f
+                for (pos in Layout.keySigPositions(clef, keyAt[mi])) {
+                    items += Glyph(if (keyAt[mi] > 0) SHARP else FLAT, kx, top + (8 - pos) / 2f); kx += 1.15f
                 }
                 if (first && s.parts.size > 1 && groups.any { it[0] == pi }) {
                     val nm = p.name.substringBefore(" (pauta").trim().let { if (it.length > 11) it.take(10) + "…" else it }
                     items += Txt(nm, x0 + 0.5f, top - 0.9f, 1.3f)
                 }
-                if (first) {
+                if (tsHeader) {
                     val tx = x0 + clefW + keyW
                     fun digits(n: Int, cy: Float) {
                         val str = n.toString(); var dx = tx
                         for (ch in str) { items += Glyph(TIME0 + (ch - '0'), dx, cy); dx += 1.7f }
                     }
-                    digits(s.beats, top + 1f); digits(s.beatType, top + 3f)
+                    digits(beatsAt[mi], top + 1f); digits(btAt[mi], top + 3f)
                 }
             }
             // linha inicial e chaves
@@ -248,19 +289,88 @@ object Engrave {
             // compassos
             for (m in mi until end) {
                 val col = cols[m]
-                val mw = col.width * factor
-                val absX = col.rel.map { cx + it * factor }
+                val firstOfSys = m == mi
+                val shift = if (firstOfSys) -col.preSig else 0f
+                val mw = wOf(m, firstOfSys) * factor
+                val absX = col.rel.map { cx + (it + shift) * factor }
+                msys[m] = sysNo; mcx[m] = cx; mmw[m] = mw; mAbsX[m] = absX
                 val anchors = col.onsets.mapIndexed { k, o -> Anchor(colQ[m] + o / div, absX[k]) }
                 measures += SMeasure(m, colQ[m], colQ[m + 1], cx, cx + mw, anchors)
+                val sm = s.copy(fifths = keyAt[m], beats = beatsAt[m], beatType = btAt[m])
                 for ((pi, p) in s.parts.withIndex()) {
-                    engraveMeasure(s, pi, p, m, evs[pi][m], col, absX, cx, cx + mw, partY[pi]!!, measStartQ[pi][m], items, snotes)
+                    val pc = if (p.clef == clefAt[pi][m]) p else p.copy(clef = clefAt[pi][m])
+                    engraveMeasure(sm, pi, pc, m, evs[pi][m], col, absX, cx, cx + mw, partY[pi]!!, measStartQ[pi][m], items, snotes)
+                }
+                // ritornelo no começo do compasso
+                if (repStartAt(m)) {
+                    for ((gi, g) in groups.withIndex()) {
+                        val (a, b) = groupSpans[gi]
+                        items += Line(cx + 0.25f, a, cx + 0.25f, b, 0.5f); items += Line(cx + 0.95f, a, cx + 0.95f, b, 0.16f)
+                        for (pi in g) { val top = partY[pi]!!; items += Glyph(DOT, cx + 1.45f, top + 1.5f); items += Glyph(DOT, cx + 1.45f, top + 2.5f) }
+                    }
+                }
+                // mudanças de armadura, compasso e clave no meio do sistema
+                if (!firstOfSys && (keyChange(m) || tsChange(m) || clefChange(m))) {
+                    for ((pi, p) in s.parts.withIndex()) {
+                        val top = partY[pi]!!
+                        var kx = cx + (if (repStartAt(m)) 1.9f else 0f) + 0.5f
+                        if (clefAt[pi][m] != clefAt[pi][m - 1]) {
+                            val c = clefAt[pi][m]
+                            items += Glyph(if (c == 'F') CLEF_F else CLEF_G, kx, top + (8 - (if (c == 'F') 6 else 2)) / 2f); kx += 3.4f
+                        }
+                        if (keyChange(m)) {
+                            val clef = clefAt[pi][m]
+                            val nat = naturalsN(keyAt[m - 1], keyAt[m])
+                            if (nat > 0) for (pos in Layout.keySigPositions(clef, keyAt[m - 1]).take(nat).let { l -> if (keyAt[m] != 0 && (keyAt[m - 1] > 0) == (keyAt[m] > 0)) Layout.keySigPositions(clef, keyAt[m - 1]).drop(abs(keyAt[m])) else l }) {
+                                items += Glyph(NATURAL, kx, top + (8 - pos) / 2f); kx += 1.15f
+                            }
+                            for (pos in Layout.keySigPositions(clef, keyAt[m])) { items += Glyph(if (keyAt[m] > 0) SHARP else FLAT, kx, top + (8 - pos) / 2f); kx += 1.15f }
+                            kx += 0.7f
+                        }
+                        if (tsChange(m)) {
+                            fun digits(n: Int, cy: Float) { var dx = kx; for (ch in n.toString()) { items += Glyph(TIME0 + (ch - '0'), dx, cy); dx += 1.7f } }
+                            digits(beatsAt[m], top + 1f); digits(btAt[m], top + 3f)
+                        }
+                    }
+                }
+                // marcas de expressão: dinâmicas, andamento, ritardando, fermata
+                for ((pi, p) in s.parts.withIndex()) {
+                    val mm = p.measures.getOrNull(m) ?: continue
+                    val top = partY[pi]!!
+                    fun xAt(at: Int): Float = if (at >= col.len) cx + mw - 0.6f else { val k = col.onsets.indexOfLast { it <= at }; if (k >= 0) absX[k] else absX[0] }
+                    for (d in mm.dyn.sortedBy { it.at }) {
+                        val dx = xAt(d.at)
+                        when (d.mark) {
+                            "cresc", "dim" -> { openHair[pi]?.let { it.sys2 = sysNo; it.x2 = dx; openHair[pi] = null }; val h = Hair(sysNo, m, dx, pi, d.mark == "cresc"); hairs += h; openHair[pi] = h }
+                            "end" -> openHair[pi]?.let { it.sys2 = sysNo; it.x2 = dx; openHair[pi] = null }
+                            else -> {
+                                openHair[pi]?.let { it.sys2 = sysNo; it.x2 = dx - 0.3f; openHair[pi] = null }
+                                var gx = dx
+                                for (c in d.mark) { val code = DYN_CODE[c] ?: continue; items += Glyph(code, gx, top + 6.0f); gx += DYN_ADV[c] ?: 1.4f }
+                            }
+                        }
+                    }
+                    if (mm.mark == "fermata") items += Glyph(FERMATA, absX.last() + 0.1f, top - 0.9f)
+                    if (pi == 0) {
+                        val tx = absX[0] - 0.1f + (if (firstOfSys) 2.8f else 0f)
+                        mm.tempo?.let { items += Txt("♩ = $it", tx, top - 3.4f, 1.7f, true) }
+                        if (mm.rit < 0) items += Txt(if (mm.rit > -18) "poco rit." else "rit.", tx + (if (mm.tempo != null) 5.5f else 0f), top - 3.4f, 1.7f)
+                        else if (mm.rit > 0) items += Txt("accel.", tx + (if (mm.tempo != null) 5.5f else 0f), top - 3.4f, 1.7f)
+                    }
                 }
                 // barras de compasso por grupo
                 val lastM = m == nMeasures - 1
-                for ((gi, _) in groups.withIndex()) {
+                for ((gi, g) in groups.withIndex()) {
                     val (a, b) = groupSpans[gi]
-                    if (lastM) { items += Line(cx + mw - 0.9f, a, cx + mw - 0.9f, b, 0.16f); items += Line(cx + mw - 0.2f, a, cx + mw - 0.2f, b, 0.5f) }
-                    else items += Line(cx + mw, a, cx + mw, b, 0.16f)
+                    if (repEndAt(m)) {
+                        val bx = cx + mw
+                        items += Line(bx - 1.2f, a, bx - 1.2f, b, 0.16f); items += Line(bx - 0.4f, a, bx - 0.4f, b, 0.5f)
+                        for (pi in g) { val top = partY[pi]!!; items += Glyph(DOT, bx - 2.0f, top + 1.5f); items += Glyph(DOT, bx - 2.0f, top + 2.5f) }
+                    } else if (lastM) { items += Line(cx + mw - 0.9f, a, cx + mw - 0.9f, b, 0.16f); items += Line(cx + mw - 0.2f, a, cx + mw - 0.2f, b, 0.5f) }
+                    else {
+                        items += Line(cx + mw, a, cx + mw, b, 0.16f)
+                        if (keyChange(m + 1) || tsChange(m + 1)) items += Line(cx + mw - 0.6f, a, cx + mw - 0.6f, b, 0.16f)   // barra dupla antes da mudança
+                    }
                 }
                 // número do compasso no início do sistema
                 if (m == mi) {
@@ -269,9 +379,43 @@ object Engrave {
                 }
                 cx += mw
             }
+            // casas de repetição (1., 2.): colchete acima da pauta de cima
+            run {
+                val top0 = staffTops.first() - 2.4f
+                var m = mi
+                while (m < end) {
+                    val v = voltaAt(m)
+                    if (v == 0) { m++; continue }
+                    var e2 = m; while (e2 + 1 < end && voltaAt(e2 + 1) == v) e2++
+                    val xa = mcx[m] + (if (repStartAt(m)) 0f else 0.3f); val xb = mcx[e2] + mmw[e2] - (if (repEndAt(e2)) 0.5f else 0.3f)
+                    items += Line(xa, top0, xb, top0, 0.13f); items += Line(xa, top0, xa, top0 + 1.7f, 0.13f)
+                    items += Txt("$v.", xa + 0.5f, top0 + 1.55f, 1.5f)
+                    m = e2 + 1
+                }
+            }
+            sysMx0 += mx0; sysXEnd += xEnd; sysPartY += partY
             systems += SSystem(sysTopY, sysBottom, x0, xEnd, measures, s.parts.indices.map { partY[it]!! })
             y = sysBottom + sysGap + 6f
             mi = end; sysNo++
+        }
+        // crescendo e diminuendo (podem atravessar sistemas)
+        for (h in hairs) {
+            val s2 = if (h.sys2 < 0) h.sys else h.sys2
+            val x2 = if (h.sys2 < 0) mcx[min(nMeasures - 1, systems[h.sys].measures.last().index)] + mmw[systems[h.sys].measures.last().index] - 0.6f else h.x2
+            var total = 0f
+            for (sy in h.sys..s2) { val xa = if (sy == h.sys) h.x else sysMx0[sy]; val xb = if (sy == s2) x2 else sysXEnd[sy] - 0.4f; total += max(xb - xa, 0.1f) }
+            var acc = 0f
+            for (sy in h.sys..s2) {
+                val xa = if (sy == h.sys) h.x else sysMx0[sy]; val xb = if (sy == s2) x2 else sysXEnd[sy] - 0.4f
+                val len = max(xb - xa, 0.1f)
+                val ty = sysPartY[sy][h.part] ?: continue
+                val yc = ty + 5.3f
+                val oa = 0.9f * min(acc / total, 1f); val ob = 0.9f * min((acc + len) / total, 1f)
+                val ha = if (h.cresc) oa else 0.9f - oa; val hb = if (h.cresc) ob else 0.9f - ob
+                items += Line(xa, yc - max(ha, 0.05f), xb, yc - max(hb, 0.05f), 0.12f)
+                items += Line(xa, yc + max(ha, 0.05f), xb, yc + max(hb, 0.05f), 0.12f)
+                acc += len
+            }
         }
         return Scene(items, widthSp, y, snotes, systems)
     }

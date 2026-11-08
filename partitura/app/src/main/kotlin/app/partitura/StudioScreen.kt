@@ -76,10 +76,10 @@ fun StudioScreen(state: AppState, wide: Boolean, goHome: () -> Unit) {
             val widthPx = constraints.maxWidth.toFloat()
             val scene = remember(s, rev, widthPx, spPx) { Engrave.scene(s, widthPx / spPx) }
             val selId = if (!state.hasSel) -1 else scene.notes.indexOfFirst { it.part == state.selP && it.m == state.selM && it.idx == state.selN }
-            val activeIds by remember(scene) { derivedStateOf { if (p.active) scene.soundingAt(p.posSec * p.usedTempo / 60.0) else emptyList() } }
+            val activeIds by remember(scene) { derivedStateOf { if (p.active) scene.soundingAt(p.posQ) else emptyList() } }
             val activeSet = remember(activeIds) { activeIds.toSet() }
             val activeMidi = remember(activeIds, scene) { activeIds.map { scene.notes[it].midi }.toSet() }
-            val curSystem by remember(scene) { derivedStateOf { if (p.active) (scene.cursor(p.posSec * p.usedTempo / 60.0)?.first ?: -1) else -1 } }
+            val curSystem by remember(scene) { derivedStateOf { if (p.active) (scene.cursor(p.posQ)?.first ?: -1) else -1 } }
 
             LaunchedEffect(curSystem, scene) {
                 if (curSystem >= 0 && curSystem < scene.systems.size) {
@@ -129,7 +129,7 @@ fun StudioScreen(state: AppState, wide: Boolean, goHome: () -> Unit) {
             Column(Modifier.fillMaxSize().verticalScroll(scroll)) {
                 ScoreView(
                     scene = scene, spPx = spPx, active = activeSet, selected = selId,
-                    cursor = { if (p.active) scene.cursor(p.posSec * p.usedTempo / 60.0) else null },
+                    cursor = { if (p.active) scene.cursor(p.posQ) else null },
                     scroll = scroll, viewportPx = viewport, onTap = onTap,
                     modifier = Modifier.clip(MaterialTheme.shapes.medium),
                 )
@@ -398,12 +398,45 @@ private fun MixerSheet(state: AppState, s: Score, onClose: () -> Unit) {
                     Text("Repetir (loop)")
                 }
             }
+            val mixNow = state.mix
+            val mixVer = state.mixRev
+            if (mixNow != null && mixVer >= 0) {
+                Column {
+                    Text("Vozes e instrumentos", style = MaterialTheme.typography.titleSmall)
+                    Text("Ouça só uma voz (Solo), silencie outra (Mudo) ou escolha o som de cada uma.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Estilo de som de todas", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+                    Wrap {
+                        FilterChip(selected = mixNow.timbre.all { it == null }, onClick = { mixNow.setAllTimbre(null); state.mixChanged(); state.restartIfPlaying() }, label = { Text("Original") })
+                        listOf("piano" to "Piano", "piano_soft" to "Piano suave", "voice" to "Coro (aah)", "voice_oo" to "Coro (ooh)", "strings" to "Cordas", "organ" to "Órgão", "pad" to "Pad", "flute" to "Flauta").forEach { (id, label) ->
+                            FilterChip(selected = mixNow.timbre.all { it == id }, onClick = { mixNow.setAllTimbre(id); state.mixChanged(); state.restartIfPlaying() }, label = { Text(label) })
+                        }
+                    }
+                    mixNow.tracks.forEachIndexed { i, t ->
+                        var menu by remember { mutableStateOf(false) }
+                        Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("${t.name}: ${(mixNow.volume[i] * 100).toInt()}%", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                                FilterChip(selected = mixNow.mute[i], onClick = { mixNow.mute[i] = !mixNow.mute[i]; state.mixChanged(); state.restartIfPlaying() }, label = { Text("Mudo") })
+                                FilterChip(selected = mixNow.solo[i], onClick = { mixNow.solo[i] = !mixNow.solo[i]; state.mixChanged(); state.restartIfPlaying() }, label = { Text("Solo") })
+                                Box {
+                                    TextBtn("Som: ${Timbre.of(mixNow.timbreId(i, s)).label}", { menu = true })
+                                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                        DropdownMenuItem(text = { Text("Original da partitura") }, onClick = { mixNow.timbre[i] = null; state.mixChanged(); menu = false; state.restartIfPlaying() })
+                                        Timbre.ALL.forEach { tb -> DropdownMenuItem(text = { Text(tb.label) }, onClick = { mixNow.timbre[i] = tb.id; state.mixChanged(); menu = false; state.restartIfPlaying() }) }
+                                    }
+                                }
+                            }
+                            Slider(value = mixNow.volume[i].toFloat(), onValueChange = { mixNow.volume[i] = it.toDouble(); state.mixChanged() }, valueRange = 0f..1.5f, onValueChangeFinished = { state.restartIfPlaying() })
+                        }
+                    }
+                }
+            }
             Column {
-                Text("Volume por instrumento", style = MaterialTheme.typography.titleSmall)
-                s.parts.forEachIndexed { i, part ->
-                    val v = state.volumes.getOrElse(i) { 1f }
-                    Text("${part.name}: ${(v * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Slider(value = v, onValueChange = { if (i < state.volumes.size) state.volumes[i] = it }, valueRange = 0f..1.5f, onValueChangeFinished = { state.restartIfPlaying() })
+                Text("Baixar o áudio", style = MaterialTheme.typography.titleSmall)
+                Text("Gera o arquivo com o que você ouve aqui (andamento, repetições, dinâmicas, vozes escolhidas) para usar em apresentações.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Wrap {
+                    Button(enabled = !state.exporting, onClick = { state.exportAudio("wav") }) { Text(if (state.exporting) "Gerando…" else "WAV") }
+                    Button(enabled = !state.exporting, onClick = { state.exportAudio("m4a") }) { Text("M4A (menor)") }
                 }
             }
         }

@@ -245,7 +245,7 @@ object Edit {
 
     /** Insere depois do compasso [m] uma cópia dele em todas as pautas (notas e acordes). */
     fun duplicateMeasure(s: Score, m: Int) {
-        for (part in s.parts) { val src = part.measures.getOrNull(m) ?: continue; part.measures.add(m + 1, Measure(0, src.notes.toMutableList(), src.harmony.toMutableList())) }
+        for (part in s.parts) { val src = part.measures.getOrNull(m) ?: continue; part.measures.add(m + 1, src.dup().copy(number = 0).also { it.repeatStart = false; it.repeatEnd = false; it.volta = 0; it.tempo = null; it.fifths = null; it.beats = null; it.beatType = null }) }
         for (part in s.parts) part.measures.forEachIndexed { i, mm -> part.measures[i] = mm.copy(number = i + 1) }
     }
 

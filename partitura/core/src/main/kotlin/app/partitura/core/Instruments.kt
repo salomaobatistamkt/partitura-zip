@@ -18,23 +18,56 @@ class Timbre(
     val decayScale: Double = 1.0,      // só para notas que decaem (maior = decai mais rápido)
     val harmDecay: Double = 1.5,       // os agudos somem mais rápido que o grave (notas que decaem)
     val gain: Double = 1.0,
+    /** inarmonicidade das cordas (B): estica os agudos como num piano real */
+    val inharm: Double = 0.0,
+    /** cordas/vozes por nota e afinação entre elas (cents): dá o "coro" e o batimento naturais */
+    val strings: Int = 1, val detune: Double = 0.0,
+    /** barulho do martelo no ataque (0..1) */
+    val hammer: Double = 0.0,
+    /** vibrato: profundidade (cents), velocidade (Hz) e atraso (s) */
+    val vibrato: Double = 0.0, val vibRate: Double = 5.3, val vibDelay: Double = 0.25,
+    /** ponto de ataque da corda (fração do comprimento); 0 = nenhum */
+    val strike: Double = 0.0,
+    /** quanto o toque (intensidade) clareia o timbre */
+    val bright: Double = 0.0,
+    /** frequência de corte suave (Hz): tira o "estridente" dos agudos */
+    val fc: Double = 7000.0,
+    /** reverberação desta voz (0..1) */
+    val room: Double = 0.2,
 ) {
     companion object {
         private fun gauss(x: Double, c: Double, w: Double) = exp(-((x - c) / w).pow(2))
 
-        val PIANO = Timbre("piano", "Piano", 6, { h, _ -> 1.0 / h.toDouble().pow(1.3) }, false, 0.004, 14.0)
-        val GUITAR = Timbre("guitar", "Violão", 8, { h, _ -> 1.0 / h.toDouble().pow(1.05) * (if (h == 1) 1.0 else 0.85) }, false, 0.003, 18.0, 1.7, 2.6, 1.15)
-        val BASS = Timbre("bass", "Baixo", 5, { h, _ -> 1.0 / h.toDouble().pow(1.6) }, false, 0.006, 14.0, 1.1, 2.0, 1.35)
-        val ORGAN = Timbre("organ", "Órgão", 6, { h, _ -> when (h) { 1 -> 1.0; 2 -> 0.7; 3 -> 0.35; 4 -> 0.5; 5 -> 0.12; else -> 0.18 } }, true, 0.018, 22.0, gain = 0.8)
-        val STRINGS = Timbre("strings", "Cordas", 12, { h, _ -> 1.0 / h.toDouble() }, true, 0.09, 9.0, gain = 0.8)
-        val FLUTE = Timbre("flute", "Flauta", 4, { h, _ -> when (h) { 1 -> 1.0; 2 -> 0.28; 3 -> 0.09; else -> 0.04 } }, true, 0.05, 16.0, gain = 1.5)
-        val REED = Timbre("reed", "Clarinete/sax", 9, { h, _ -> if (h % 2 == 1) 1.0 / h.toDouble().pow(0.9) else 0.07 / h }, true, 0.04, 16.0, gain = 1.0)
-        val BRASS = Timbre("brass", "Metais", 10, { h, _ -> 1.0 / h.toDouble().pow(0.85) }, true, 0.035, 14.0, gain = 0.85)
-        /** Voz "aah": harmônicos realçados perto de formantes de vogal aberta. */
-        val VOICE = Timbre("voice", "Voz", 22, { h, f0 -> val f = h * f0; (gauss(f, 700.0, 380.0) + 0.65 * gauss(f, 1150.0, 420.0) + 0.25 * gauss(f, 2600.0, 600.0) + 0.05) / h.toDouble().pow(0.55) },
-            true, 0.07, 10.0, gain = 1.1)
+        val PIANO = Timbre("piano", "Piano", 14, { h, _ -> 1.0 / h.toDouble().pow(1.15) }, false, 0.003, 14.0, 1.0, 1.7, 1.3,
+            inharm = 0.0003, strings = 2, detune = 1.4, hammer = 0.35, strike = 0.125, bright = 0.6, fc = 4200.0, room = 0.22)
+        val PIANO_SOFT = Timbre("piano_soft", "Piano macio", 9, { h, _ -> 1.0 / h.toDouble().pow(1.7) }, false, 0.006, 12.0, 1.15, 1.9, 0.9,
+            inharm = 0.0002, strings = 2, detune = 0.9, hammer = 0.12, bright = 0.35, fc = 2300.0, room = 0.3)
+        val EPIANO = Timbre("epiano", "Piano elétrico", 8, { h, _ -> when (h) { 1 -> 1.0; 2 -> 0.4; 3 -> 0.1; 4 -> 0.26; 5 -> 0.04; 6 -> 0.09; else -> 0.03 } }, false, 0.004, 12.0, 0.8, 2.6, 1.1,
+            strings = 2, detune = 3.0, hammer = 0.06, bright = 0.5, fc = 3500.0, room = 0.25)
+        val GUITAR = Timbre("guitar", "Violão", 10, { h, _ -> 1.0 / h.toDouble().pow(1.05) * (if (h == 1) 1.0 else 0.85) }, false, 0.003, 18.0, 1.7, 2.6, 1.25,
+            inharm = 0.00005, strings = 2, detune = 0.8, hammer = 0.1, strike = 0.18, bright = 0.4, fc = 3800.0, room = 0.2)
+        val HARP = Timbre("harp", "Harpa", 8, { h, _ -> 1.0 / h.toDouble().pow(1.4) }, false, 0.002, 12.0, 2.0, 2.2, 0.63, hammer = 0.05, bright = 0.3, fc = 3500.0, room = 0.35)
+        val BASS = Timbre("bass", "Baixo", 7, { h, _ -> 1.0 / h.toDouble().pow(1.6) }, false, 0.006, 14.0, 1.1, 2.0, 0.52, hammer = 0.08, bright = 0.3, fc = 1500.0, room = 0.1)
+        val ORGAN = Timbre("organ", "Órgão", 8, { h, _ -> when (h) { 1 -> 1.0; 2 -> 0.7; 3 -> 0.35; 4 -> 0.5; 5 -> 0.12; 6 -> 0.18; else -> 0.06 } }, true, 0.018, 22.0, gain = 0.73,
+            strings = 2, detune = 2.0, fc = 4000.0, room = 0.35)
+        val STRINGS = Timbre("strings", "Cordas", 14, { h, _ -> 1.0 / h.toDouble().pow(1.25) }, true, 0.11, 7.0, gain = 0.56,
+            strings = 3, detune = 9.0, vibrato = 7.0, vibRate = 5.4, vibDelay = 0.3, bright = 0.3, fc = 3200.0, room = 0.4)
+        val PAD = Timbre("pad", "Pad suave", 8, { h, _ -> 1.0 / h.toDouble().pow(1.6) }, true, 0.35, 4.0, gain = 0.43,
+            strings = 3, detune = 12.0, vibrato = 3.0, vibRate = 4.6, vibDelay = 0.5, fc = 2000.0, room = 0.5)
+        val FLUTE = Timbre("flute", "Flauta", 5, { h, _ -> when (h) { 1 -> 1.0; 2 -> 0.28; 3 -> 0.09; 4 -> 0.04; else -> 0.02 } }, true, 0.05, 16.0, gain = 0.225,
+            vibrato = 6.0, vibRate = 5.0, vibDelay = 0.35, fc = 4500.0, room = 0.3)
+        val REED = Timbre("reed", "Clarinete/sax", 12, { h, _ -> if (h % 2 == 1) 1.0 / h.toDouble().pow(0.9) else 0.07 / h }, true, 0.04, 16.0, gain = 0.28,
+            vibrato = 4.0, vibDelay = 0.4, fc = 3000.0, room = 0.25)
+        val BRASS = Timbre("brass", "Metais", 12, { h, _ -> 1.0 / h.toDouble().pow(0.95) }, true, 0.04, 14.0, gain = 0.365,
+            vibrato = 3.0, vibDelay = 0.5, bright = 0.5, fc = 2800.0, room = 0.3)
+        /** Coro "aah": harmônicos realçados perto de formantes de vogal aberta; 3 vozes levemente desafinadas e vibrato. */
+        val VOICE = Timbre("voice", "Coro (aah)", 24, { h, f0 -> val f = h * f0; (gauss(f, 700.0, 380.0) + 0.65 * gauss(f, 1150.0, 420.0) + 0.25 * gauss(f, 2600.0, 600.0) + 0.05) / h.toDouble().pow(0.55) },
+            true, 0.09, 8.0, gain = 0.565, strings = 3, detune = 11.0, vibrato = 11.0, vibRate = 5.1, vibDelay = 0.3, bright = 0.2, fc = 3600.0, room = 0.4)
+        /** Coro "ooh": vogal fechada, mais escura e macia. */
+        val VOICE_OO = Timbre("voice_oo", "Coro (ooh)", 20, { h, f0 -> val f = h * f0; (gauss(f, 380.0, 220.0) + 0.35 * gauss(f, 800.0, 260.0) + 0.05 * gauss(f, 2300.0, 500.0) + 0.02) / h.toDouble().pow(0.7) },
+            true, 0.12, 7.0, gain = 0.41, strings = 3, detune = 10.0, vibrato = 9.0, vibRate = 4.9, vibDelay = 0.35, fc = 2400.0, room = 0.45)
 
-        val ALL = listOf(PIANO, GUITAR, BASS, ORGAN, STRINGS, FLUTE, REED, BRASS, VOICE)
+        val ALL = listOf(PIANO, PIANO_SOFT, EPIANO, GUITAR, HARP, BASS, ORGAN, STRINGS, PAD, FLUTE, REED, BRASS, VOICE, VOICE_OO)
         fun of(id: String): Timbre = ALL.firstOrNull { it.id == id } ?: PIANO
     }
 }
@@ -77,7 +110,7 @@ object Instruments {
         Preset("strings", "Cordas (2 violinos, violoncelo)", listOf("violin", "violin", "cello")),
     )
 
-    private val GM = mapOf("piano" to 0, "guitar" to 24, "bass" to 33, "organ" to 19, "strings" to 40, "flute" to 73, "reed" to 71, "brass" to 56, "voice" to 54)
+    private val GM = mapOf("piano" to 0, "piano_soft" to 0, "epiano" to 4, "guitar" to 24, "harp" to 46, "bass" to 33, "organ" to 19, "strings" to 48, "pad" to 89, "flute" to 73, "reed" to 71, "brass" to 56, "voice" to 52, "voice_oo" to 53)
     /** Programa General MIDI (0..127) que representa o timbre. */
     fun gm(timbreId: String) = GM[timbreId] ?: 0
 

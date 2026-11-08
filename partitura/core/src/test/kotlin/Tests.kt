@@ -31,7 +31,7 @@ fun main() {
     check("MIDI tem MThd e MTrk", String(mid, 0, 4) == "MThd" && String(mid, 14, 4) == "MTrk")
     // zero-crossing: frequência da síntese do Lá4 a 440 Hz
     val a = Synth.render(mk(0, Pitch('A', 0, 4)).also { it.tempo = 60 }, 60)
-    var zc = 0; for (i in 1 until 44100 / 4) if (a[i - 1] < 0 && a[i] >= 0) zc++
+    var zc = 0; for (i in 8001 until 8000 + 44100 / 4) if (a[i - 1] < 0 && a[i] >= 0) zc++
     check("Lá4 sintetizado perto de 440 Hz (${zc * 4} Hz)", zc * 4 in 420..460)
 
     fun pn(l: List<Pitch>) = l.joinToString(" ") { it.toString() }
@@ -604,6 +604,42 @@ fun main() {
         check("PDF vetorial: 4/4 e armadura vazia", r != null && r.score.beats == 4 && r.score.fifths == 0)
         val nonMusic = VectorOmr.read("%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n".toByteArray(), OmrOptions())
         check("PDF vetorial: PDF sem notação devolve null (usa leitor de imagem)", nonMusic == null)
+    }
+    // ---- repetições, dinâmicas, andamento, vozes ----
+    run {
+        fun bar(n: Int, pitch: Char = 'C') = Measure(n, mutableListOf(Note(Pitch(pitch, 0, 4), 4)))
+        val sc = Score("rep", 1, 0, 4, 4, 60, mutableListOf(Part("P1", "Coro", mutableListOf(bar(1), bar(2), bar(3), bar(4), bar(5)), 'G', "P1", "voice")))
+        val ms = sc.parts[0].measures
+        ms[0].repeatStart = true; ms[2].volta = 1; ms[2].repeatEnd = true; ms[3].volta = 2
+        check("Ritornelo com casas 1/2: ordem 1 2 3 | 1 2 4 5", Playlist.order(sc, true) == listOf(0, 1, 2, 0, 1, 3, 4))
+        check("Sem expandir: ordem natural", Playlist.order(sc, false) == listOf(0, 1, 2, 3, 4))
+        val tl = Playlist.timeline(sc, 60, true)
+        check("Linha do tempo com repetição: 7 compassos tocados, 28 s", tl.played.size == 7 && Math.abs(tl.totalSec - 28.0) < 1e-6)
+        check("Cursor: 2ª passagem volta ao compasso 1 (t=12 s -> 0; t=18 s -> 6 semínimas)", Math.abs(tl.scoreQ(12.0)) < 1e-6 && Math.abs(tl.scoreQ(18.0) - 6.0) < 1e-6)
+        check("Posição→tempo: compasso 2 (4 semínimas) começa em 4 s", Math.abs(tl.secOfScoreQ(4.0) - 4.0) < 1e-6 && Math.abs(tl.secOfScoreQ(10.0) - 10.0) < 1e-6)
+        ms[0].dyn += Dyn(0, "pp"); ms[3].dyn += Dyn(0, "ff")
+        val ev = Synth.events(sc, 60, true)
+        check("Dinâmica: pp soa mais fraco que ff", ev.first().vel < 45 && ev.last().vel > 100)
+        check("Modo plain ignora dinâmica", Synth.events(sc, 60, true, true).all { it.vel == 80 })
+        ms[1].tempo = 30
+        check("Mudança de andamento: compasso a 30 bpm dura 8 s", Math.abs(Playlist.timeline(sc, 60, false).played[1].secLen - 8.0) < 1e-6)
+        val back = MusicXml.parseAny(MusicXml.write(sc).toByteArray())
+        val bm = back.parts[0].measures
+        check("MusicXML guarda ritornelo, casas, dinâmica e andamento", bm[0].repeatStart && bm[2].repeatEnd && bm[2].volta == 1 && bm[3].volta == 2 && bm[0].dyn.any { it.mark == "pp" } && bm[1].tempo == 30)
+        // vozes S/C/T/B
+        fun two(n: Int, up: Pitch, dn: Pitch) = Measure(n, mutableListOf(Note(up, 4, 1), Note(dn, 4, 2)))
+        val coro = Score("coro", 1, 0, 4, 4, 100, mutableListOf(
+            Part("P1", "Coro (pauta 1)", mutableListOf(two(1, Pitch('E', 0, 5), Pitch('C', 0, 5)), two(2, Pitch('D', 0, 5), Pitch('B', 0, 4)), Measure(3, mutableListOf(Note(Pitch('C', 0, 5), 4, 1)))), 'G', "G1", "voice"),
+            Part("P2", "Coro (pauta 2)", mutableListOf(two(1, Pitch('G', 0, 3), Pitch('C', 0, 3)), two(2, Pitch('F', 0, 3), Pitch('B', 0, 2)), Measure(3, mutableListOf(Note(Pitch('C', 0, 3), 4, 1)))), 'F', "G1", "voice")))
+        val mix = Tracks.derive(coro)
+        check("Vozes: S C T B separadas (" + mix.tracks.joinToString { it.name } + ")", mix.tracks.map { it.name } == listOf("Soprano", "Contralto", "Tenor", "Baixo"))
+        val all = Synth.render(coro, 100, mix = mix).count { it.toInt() != 0 }
+        mix.mute[1] = true; mix.mute[2] = true; mix.mute[3] = true
+        val onlyS = Synth.render(coro, 100, mix = mix).count { it.toInt() != 0 }
+        check("Mesa: só o soprano toca menos que o coro todo", onlyS in 1 until all)
+        mix.mute.fill(false); mix.solo[3] = true
+        val ev3 = ArrayList<Int>(); for (e in Synth.events(coro, 100)) for (t in mix.tracksFor(e.part, e.voice, e.mi)) if (mix.audible(t)) ev3 += e.midi
+        check("Solo do baixo: toca só a 2ª voz da pauta de Fá (e a 1ª no compasso em uníssono)", ev3.sorted() == listOf(Pitch('C', 0, 3).midi, Pitch('B', 0, 2).midi, Pitch('C', 0, 3).midi).sorted())
     }
     println(if (fails == 0) "TODOS OS TESTES PASSARAM" else "$fails FALHAS")
     kotlin.system.exitProcess(if (fails == 0) 0 else 1)

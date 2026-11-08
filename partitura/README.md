@@ -2,6 +2,14 @@
 
 Aplicativo de partituras para celular e tablet. Funciona offline.
 
+## Novidades da v0.9
+- **Leitura de PDF mais precisa**: repetições, casas 1./2., mudança de tonalidade/compasso, dinâmicas (pp–ff, mf, mp), crescendo/diminuendo, andamento, rit., fermata; pautas vazias ocultas alinhadas; duas vozes por pauta.
+- **Ouvir**: modo padrão com clave de Sol e Fá (arranjo completo de piano) ou só melodia.
+- **Mixer**: soprano, contralto, tenor e baixo (volume, mudo, solo), timbre por trilha, som menos estridente.
+- **Exportar áudio**: WAV e M4A (AAC) para apresentações. MP3 não é gerado (sem codificador nativo no Android).
+- Layout respeita a barra de status do tablet.
+- **Limites honestos**: PDFs sem fontes musicais (glifos vetorizados, ex. "Hino de Louvor") não são lidos; clave de tenor 8vb e fermata na reprodução ainda não; interface Android e exportação M4A não foram testadas em aparelho (o CI só prova compilação e testes do núcleo). SoundFont e importação MIDI continuam pendentes.
+
 ## Novidades da v0.7
 - **Ler** (nova aba): abre PDF ou imagem de partitura e converte em notas editáveis, 100% no aparelho (sem servidor). Leitor próprio em Kotlin (`core/Omr.kt`): pautas, claves de Sol/Fá, armadura, fórmula de compasso, notas cheias/vazias, pausas, pontos, acidentes, colcheias/barras, sistemas de 1–2 pautas.
 - **Limites honestos**: funciona bem com partitura impressa nítida (PDF digital). Fotos tortas ou com sombra: modo "é uma foto" ajuda, mas não corrige inclinação. Ainda não lê tercinas, ligaduras, letras, dinâmicas, claves de Dó nem várias vozes numa pauta. Acordes de semibreves empilhadas e outras fontes musicais (além de Bravura/Leland) são menos precisos. Sempre confira no Estúdio.

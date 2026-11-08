@@ -16,7 +16,7 @@ object Midi {
         out.write("MThd".toByteArray()); be32(6); be16(1); be16(s.parts.size); be16(480)
         val tpq = 480.0 / s.divisions
         for ((pi, _) in s.parts.withIndex()) {
-            val ev = Synth.events(s.copy(parts = mutableListOf(s.parts[pi])), 60 )
+            val ev = Synth.events(s.copy(parts = mutableListOf(s.parts[pi])), 60, plain = true)
             val items = mutableListOf<Triple<Int, Int, Int>>() // tick, midi, on(1)/off(0)
             // com tempo=60, segundos == tempo em semínimas
             for (e in ev) { items += Triple((e.startSec * 480).toInt(), e.midi, 1); items += Triple(((e.startSec + e.durSec) * 480).toInt(), e.midi, 0) }
