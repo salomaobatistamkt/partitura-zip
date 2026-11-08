@@ -12,9 +12,31 @@ data class Pitch(val step: Char, val alter: Int, val octave: Int) {
 }
 
 /** Nota ou pausa (pitch == null). [duration] em divisões do quarto de nota. */
-data class Note(val pitch: Pitch?, val duration: Int, val voice: Int = 1, val chord: Boolean = false, val tieStart: Boolean = false, val tieStop: Boolean = false)
+data class Note(val pitch: Pitch?, val duration: Int, val voice: Int = 1, val chord: Boolean = false, val tieStart: Boolean = false, val tieStop: Boolean = false,
+                /** Sílaba da letra (null = sem letra); [syl]: 's' inteira, 'b' começa palavra, 'm' meio, 'e' fim de palavra. */
+                val lyric: String? = null, val syl: Char = 's')
 
-data class Measure(val number: Int, val notes: MutableList<Note> = mutableListOf())
+/** Cifra de acorde num ponto do compasso ([at] em divisões desde o início do compasso). [kind] segue os nomes do MusicXML. */
+data class Harmony(val at: Int, val step: Char, val alter: Int, val kind: String = "major", val bassStep: Char? = null, val bassAlter: Int = 0) {
+    val rootPc: Int get() = Math.floorMod(Pitch.STEP_SEMITONES.getValue(step) + alter, 12)
+    val bassPc: Int get() = bassStep?.let { Math.floorMod(Pitch.STEP_SEMITONES.getValue(it) + bassAlter, 12) } ?: rootPc
+    fun intervals(): List<Int> = KINDS[kind]?.first ?: KINDS.getValue("major").first
+    /** Classes de altura (0..11) das notas do acorde. */
+    fun pcs(): List<Int> = intervals().map { (rootPc + it) % 12 }
+    fun text(): String = Names.step(step, alter) + (KINDS[kind]?.second ?: "") + (if (bassStep != null && bassPc != rootPc) "/" + Names.step(bassStep, bassAlter) else "")
+    companion object {
+        /** tipo → (intervalos em semitons a partir da fundamental, sufixo da cifra) */
+        val KINDS: Map<String, Pair<List<Int>, String>> = linkedMapOf(
+            "major" to (listOf(0, 4, 7) to ""), "minor" to (listOf(0, 3, 7) to "m"), "dominant" to (listOf(0, 4, 7, 10) to "7"),
+            "major-seventh" to (listOf(0, 4, 7, 11) to "maj7"), "minor-seventh" to (listOf(0, 3, 7, 10) to "m7"),
+            "diminished" to (listOf(0, 3, 6) to "dim"), "half-diminished" to (listOf(0, 3, 6, 10) to "m7♭5"), "diminished-seventh" to (listOf(0, 3, 6, 9) to "dim7"),
+            "augmented" to (listOf(0, 4, 8) to "aug"), "suspended-fourth" to (listOf(0, 5, 7) to "sus4"), "suspended-second" to (listOf(0, 2, 7) to "sus2"),
+            "major-sixth" to (listOf(0, 4, 7, 9) to "6"), "minor-sixth" to (listOf(0, 3, 7, 9) to "m6"), "dominant-ninth" to (listOf(0, 4, 7, 10, 14) to "9"),
+        )
+    }
+}
+
+data class Measure(val number: Int, val notes: MutableList<Note> = mutableListOf(), val harmony: MutableList<Harmony> = mutableListOf())
 
 data class Part(val id: String, val name: String, val measures: MutableList<Measure> = mutableListOf(), var clef: Char = 'G', val group: String = id, var inst: String = "piano")
 
@@ -29,5 +51,5 @@ data class Score(
 )
 
 fun Score.copyDeep(): Score = copy(parts = parts.map { p ->
-    Part(p.id, p.name, p.measures.map { m -> Measure(m.number, m.notes.toMutableList()) }.toMutableList(), p.clef, p.group, p.inst)
+    Part(p.id, p.name, p.measures.map { m -> Measure(m.number, m.notes.toMutableList(), m.harmony.toMutableList()) }.toMutableList(), p.clef, p.group, p.inst)
 }.toMutableList())

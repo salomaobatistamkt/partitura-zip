@@ -124,7 +124,7 @@ object Edit {
 
     fun deleteMeasure(s: Score, m: Int) {
         for (part in s.parts) if (part.measures.size > 1 && m in part.measures.indices) part.measures.removeAt(m)
-        for (part in s.parts) part.measures.forEachIndexed { i, mm -> part.measures[i] = Measure(i + 1, mm.notes) }
+        for (part in s.parts) part.measures.forEachIndexed { i, mm -> part.measures[i] = mm.copy(number = i + 1) }
     }
 
     /** Duração (em divisões) de cada compasso, tomada da primeira parte (cobre compasso anacrusico). */

@@ -9,6 +9,10 @@ object MusicXml {
     private fun Element.kid(tag: String) = kids(tag).firstOrNull()
     private fun Element.text(tag: String) = kid(tag)?.textContent?.trim()
 
+    private val HARMONY_KIND = mapOf("major-minor" to "minor", "major-ninth" to "dominant-ninth", "dominant-11th" to "dominant-ninth", "dominant-13th" to "dominant-ninth",
+        "minor-ninth" to "minor-seventh", "minor-11th" to "minor-seventh", "minor-13th" to "minor-seventh", "major-ninth" to "major-seventh", "major-11th" to "major-seventh", "major-13th" to "major-seventh",
+        "suspended-fourth" to "suspended-fourth", "power" to "major", "other" to "major", "none" to "major")
+
     /** Aceita .musicxml/.xml e .mxl (zip). Garante divisões múltiplas de 4. */
     fun parseAny(data: ByteArray): Score {
         val xml = if (data.size > 4 && data[0] == 'P'.code.toByte() && data[1] == 'K'.code.toByte()) unzipMxl(data) else data
@@ -37,7 +41,10 @@ object MusicXml {
         val f = 4 / gcd(s.divisions, 4)
         if (f == 1) return s
         s.divisions *= f
-        for (p in s.parts) for (m in p.measures) for (i in m.notes.indices) m.notes[i] = m.notes[i].copy(duration = m.notes[i].duration * f)
+        for (p in s.parts) for (m in p.measures) {
+            for (i in m.notes.indices) m.notes[i] = m.notes[i].copy(duration = m.notes[i].duration * f)
+            for (i in m.harmony.indices) m.harmony[i] = m.harmony[i].copy(at = m.harmony[i].at * f)
+        }
         return s
     }
 
@@ -99,6 +106,7 @@ object MusicXml {
                 fun meas(n: Int): Measure = ms.getOrPut(n) { Measure(num) }
                 var curStaff = 1
                 var lastVoice = 1
+                var tpos = 0
                 val els = (0 until m.childNodes.length).map { m.childNodes.item(it) }.filterIsInstance<Element>()
                 for (n in els) {
                     when (n.tagName) {
@@ -123,7 +131,21 @@ object MusicXml {
                         "forward" -> {
                             val d = n.text("duration")?.toIntOrNull() ?: 0
                             val st = n.text("staff")?.toIntOrNull() ?: curStaff
-                            if (d > 0) { staffPart(st); meas(st).notes += Note(null, d, n.text("voice")?.toIntOrNull() ?: lastVoice) }
+                            if (d > 0) { staffPart(st); meas(st).notes += Note(null, d, n.text("voice")?.toIntOrNull() ?: lastVoice); tpos += d }
+                        }
+                        "backup" -> tpos = (tpos - (n.text("duration")?.toIntOrNull() ?: 0)).coerceAtLeast(0)
+                        "harmony" -> {
+                            val root = n.kid("root")
+                            val step = root?.text("root-step")?.firstOrNull()
+                            if (step != null && step in "ABCDEFG") {
+                                val kindEl = n.kid("kind")
+                                val kind = kindEl?.textContent?.trim()?.let { HARMONY_KIND[it] ?: it } ?: "major"
+                                val bass = n.kid("bass")
+                                val off = n.text("offset")?.toIntOrNull() ?: 0
+                                meas(1).harmony += Harmony((tpos + off).coerceAtLeast(0), step, root.text("root-alter")?.toDoubleOrNull()?.toInt() ?: 0,
+                                    if (Harmony.KINDS.containsKey(kind)) kind else "major",
+                                    bass?.text("bass-step")?.firstOrNull(), bass?.text("bass-alter")?.toDoubleOrNull()?.toInt() ?: 0)
+                            }
                         }
                         "note" -> {
                             if (n.kid("grace") != null) continue
@@ -142,8 +164,12 @@ object MusicXml {
                                 (n.kid("notations")?.kids("tied")?.map { it.getAttribute("type") } ?: emptyList())
                             val dur = n.text("duration")?.toIntOrNull() ?: 0
                             if (dur <= 0) continue
-                            meas(st).notes += Note(if (unpitched) null else pitch, dur, voice,
-                                n.kid("chord") != null, "start" in ties, "stop" in ties)
+                            val ly = n.kids("lyric").firstOrNull()
+                            val lyText = ly?.text("text")?.takeIf { it.isNotEmpty() }
+                            val syl = when (ly?.text("syllabic")) { "begin" -> 'b'; "middle" -> 'm'; "end" -> 'e'; else -> 's' }
+                            val isChord = n.kid("chord") != null
+                            meas(st).notes += Note(if (unpitched) null else pitch, dur, voice, isChord, "start" in ties, "stop" in ties, lyText, syl)
+                            if (!isChord) tpos += dur
                         }
                     }
                 }
@@ -194,8 +220,21 @@ object MusicXml {
                     val notes = pt.measures.getOrNull(i)?.notes ?: emptyList()
                     for (v in notes.map { it.voice }.distinct().sorted()) blocks += (k + 1) to notes.filter { it.voice == v }
                 }
+                val harmDone = HashSet<Int>()
                 blocks.forEachIndexed { bi, (staff, notes) ->
+                    val hs = if (harmDone.add(staff)) (g[staff - 1].measures.getOrNull(i)?.harmony ?: emptyList()).sortedBy { it.at } else emptyList()
+                    var hi = 0; var tcur = 0
+                    fun harm(h: Harmony, off: Int) {
+                        sb.append("      <harmony><root><root-step>${h.step}</root-step>")
+                        if (h.alter != 0) sb.append("<root-alter>${h.alter}</root-alter>")
+                        sb.append("</root><kind text=\"${esc(Harmony.KINDS[h.kind]?.second ?: "")}\">${h.kind}</kind>")
+                        if (h.bassStep != null && h.bassPc != h.rootPc) { sb.append("<bass><bass-step>${h.bassStep}</bass-step>"); if (h.bassAlter != 0) sb.append("<bass-alter>${h.bassAlter}</bass-alter>"); sb.append("</bass>") }
+                        if (off != 0) sb.append("<offset>$off</offset>")
+                        if (g.size > 1) sb.append("<staff>$staff</staff>")
+                        sb.append("</harmony>\n")
+                    }
                     for (n in notes) {
+                        if (!n.chord) while (hi < hs.size && hs[hi].at < tcur + n.duration) { harm(hs[hi], (hs[hi].at - tcur).coerceAtLeast(0)); hi++ }
                         sb.append("      <note>")
                         if (n.chord) sb.append("<chord/>")
                         val pt = n.pitch
@@ -209,8 +248,14 @@ object MusicXml {
                         if (n.tieStart) sb.append("<tie type=\"start\"/>")
                         sb.append("<voice>${n.voice}</voice>")
                         if (g.size > 1) sb.append("<staff>$staff</staff>")
+                        if (n.lyric != null) {
+                            val syl = when (n.syl) { 'b' -> "begin"; 'm' -> "middle"; 'e' -> "end"; else -> "single" }
+                            sb.append("<lyric number=\"1\"><syllabic>$syl</syllabic><text>${esc(n.lyric)}</text></lyric>")
+                        }
                         sb.append("</note>\n")
+                        if (!n.chord) tcur += n.duration
                     }
+                    while (hi < hs.size) { harm(hs[hi], 0); hi++ }
                     if (bi < blocks.size - 1) {
                         val total = notes.filter { !it.chord }.sumOf { it.duration }
                         if (total > 0) sb.append("      <backup><duration>$total</duration></backup>\n")

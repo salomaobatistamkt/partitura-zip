@@ -34,6 +34,10 @@ object Transpose {
                 while (f > hi) f -= 12
                 while (f < lo) f += 12
                 n.copy(pitch = fromFifths(f, target, pt.octave))
+            }.toMutableList(), m.harmony.map { h ->
+                val r = Spell.forMidi(60 + h.rootPc + semitones, newFifths)
+                val b = h.bassStep?.let { Spell.forMidi(60 + h.bassPc + semitones, newFifths) }
+                h.copy(step = r.step, alter = r.alter, bassStep = b?.step, bassAlter = b?.alter ?: 0)
             }.toMutableList())
             out.parts += np
         }

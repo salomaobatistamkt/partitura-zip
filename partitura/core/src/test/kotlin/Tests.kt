@@ -364,6 +364,38 @@ fun main() {
         cleanServer("192.168.0.10:8080") == "http://192.168.0.10:8080" && cleanServer("omr.exemplo.com/omr?token=x") == "https://omr.exemplo.com" &&
         serverProblem("http://omr.exemplo.com") != null && serverProblem("http://192.168.0.10:8080") == null && serverProblem("https://omr.exemplo.com") == null && serverProblem("") != null)
     check("Nomes em cifra", Names.key(-3) == "E♭" && Names.key(0) == "C" && Names.minorKey(0) == "A" && Names.step('F', 1) == "F♯" && Names.pitch(Pitch('B', -1, 3)) == "B♭3")
+    run {
+        val letra = "Eu quero ver o sol brilhar\nno céu azul da minha vida\n\nO amor é uma canção\nque nasce no meu coração"
+        check("Sílabas: pás-sa-ros, car-ro, nos-so, co-ra-ção",
+            Lyrics.syllabify("pássaros") == listOf("pás", "sa", "ros") && Lyrics.syllabify("carro") == listOf("car", "ro") &&
+            Lyrics.syllabify("nosso") == listOf("nos", "so") && Lyrics.syllabify("coração").size == 3)
+        var okAll = true; var why = ""
+        for ((fifths, minor) in listOf(0 to false, -3 to false, 2 to false, 0 to true, 1 to true, -4 to true)) for ((b, t) in listOf(4 to 4, 3 to 4, 2 to 4, 6 to 8, 12 to 8, 5 to 4, 9 to 8, 3 to 8, 2 to 2)) for (dens in 0..2) for (cpb in 1..2) for (pk in listOf(true, false)) {
+            val st = CreativeSettings(fifths = fifths, minor = minor, beats = b, beatType = t, density = dens, chordsPerBar = cpb, seed = (fifths * 7 + b + dens).toLong(), pickup = pk, sevenths = dens == 2)
+            try {
+                val r = Compose.compose(letra, st)
+                val notes = r.score.parts[0].measures.flatMap { it.notes }
+                val sung = notes.filter { it.pitch != null }
+                val nSyl = Lyrics.parse(letra).sumOf { it.syls.size }
+                if (Validate.measureDurations(r.score).isNotEmpty()) { okAll = false; why = "duração $fifths $minor $b/$t $dens" }
+                if (sung.any { it.pitch!!.midi < st.low - 3 || it.pitch!!.midi > st.high + 3 }) { okAll = false; why = "alcance $fifths $minor $b/$t" }
+                if (sung.count { it.lyric != null } != nSyl) { okAll = false; why = "letras ${sung.count { it.lyric != null }} != $nSyl em $b/$t d$dens" }
+                if (r.score.parts[0].measures.all { it.harmony.isEmpty() }) { okAll = false; why = "sem acordes $b/$t" }
+                val rt = MusicXml.parse(MusicXml.write(r.score).toByteArray())
+                val n2 = rt.parts[0].measures.flatMap { it.notes }
+                if (n2.count { it.lyric != null } != nSyl || rt.parts[0].measures.sumOf { it.harmony.size } != r.score.parts[0].measures.sumOf { it.harmony.size }) { okAll = false; why = "ida e volta $b/$t" }
+                Engrave.scene(r.score, 70f); Synth.render(r.score, 100)
+            } catch (e: Throwable) { okAll = false; why = "exceção ${e}: $fifths $minor $b/$t" }
+        }
+        check("Criatividade: 6 tons × 9 compassos × 3 densidades × 2 harmonias × anacruse: válido, no alcance, 1 sílaba por nota, MusicXML ida e volta, grava e toca ($why)", okAll)
+        val a = Compose.compose(letra, CreativeSettings(seed = 5)); val b2 = Compose.compose(letra, CreativeSettings(seed = 5)); val c = Compose.compose(letra, CreativeSettings(seed = 6))
+        check("Criatividade: mesma semente dá a mesma música, outra semente varia", MusicXml.write(a.score) == MusicXml.write(b2.score) && MusicXml.write(a.score) != MusicXml.write(c.score))
+        val tr = Transpose.bySemitones(a.score, 2)
+        check("Transpor leva os acordes juntos", tr.parts[0].measures.flatMap { it.harmony }.first().rootPc == (a.score.parts[0].measures.flatMap { it.harmony }.first().rootPc + 2) % 12)
+        val t0 = System.nanoTime(); val big = Compose.compose((1..40).joinToString("\n") { "essa é a linha número um de uma canção longa e bonita" }, CreativeSettings(seed = 3))
+        val ms = (System.nanoTime() - t0) / 1_000_000
+        check("Criatividade: 40 versos em ${ms} ms (limite 5 s)", ms < 5000 && Validate.measureDurations(big.score).isEmpty())
+    }
     println(if (fails == 0) "TODOS OS TESTES PASSARAM" else "$fails FALHAS")
     kotlin.system.exitProcess(if (fails == 0) 0 else 1)
 }

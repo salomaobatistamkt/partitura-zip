@@ -59,8 +59,8 @@ object Engrave {
     const val CLEF_G = 0xE050; const val CLEF_F = 0xE062
     const val SHARP = 0xE262; const val FLAT = 0xE260; const val NATURAL = 0xE261
     const val DOT = 0xE1E7
-    private val FLAG_UP = intArrayOf(0, 0, 0xE240, 0xE242, 0xE244, 0xE246)
-    private val FLAG_DOWN = intArrayOf(0, 0, 0xE241, 0xE243, 0xE245, 0xE247)
+    private val FLAG_UP = intArrayOf(0, 0, 0, 0xE240, 0xE242, 0xE244)
+    private val FLAG_DOWN = intArrayOf(0, 0, 0, 0xE241, 0xE243, 0xE245)
     private val REST = mapOf(0 to 0xE4E3, 1 to 0xE4E4, 2 to 0xE4E5, 3 to 0xE4E6, 4 to 0xE4E7, 5 to 0xE4E8)
     const val TIME0 = 0xE080
 
@@ -104,6 +104,14 @@ object Engrave {
         return out
     }
 
+    /** Largura estimada (em sp) de um texto de tamanho [size]; a fonte do sistema varia, então é uma estimativa generosa. */
+    fun textWidth(t: String, size: Float): Float = t.sumOf { c ->
+        (when { c in "iIl.,;:'!|-" -> 0.32; c in "mwMW" -> 0.85; c.isUpperCase() || c.isDigit() -> 0.66; else -> 0.52 }) }.toFloat() * size
+
+    const val LYRIC_SIZE = 1.55f
+    const val CHORD_SIZE = 1.75f
+    private fun lyricShown(n: Note): String? = n.lyric?.takeIf { it.isNotEmpty() }?.let { it + if (n.syl == 'b' || n.syl == 'm') "-" else "" }
+
     private fun space(q: Double) = (1.9 + 2.1 * sqrt(max(q, 0.125))).toFloat()
 
     private class MeasureCol(val len: Int, val onsets: List<Int>, val rel: List<Float>, val width: Float)
@@ -133,7 +141,15 @@ object Engrave {
             val len = ((colQ[mi + 1] - colQ[mi]) * div).toInt().coerceAtLeast(1)
             val on = java.util.TreeSet<Int>(); on += 0
             val accAt = HashMap<Int, Boolean>()
+            val need = HashMap<Int, Float>()   // largura mínima de coluna por causa de letra ou cifra
             for (pi in s.parts.indices) {
+                val mm = s.parts[pi].measures.getOrNull(mi)
+                mm?.harmony?.forEach { h -> val at = h.at.coerceIn(0, len - 1); on += at; need[at] = max(need[at] ?: 0f, textWidth(h.text(), CHORD_SIZE) + 0.7f) }
+                for (e in evs[pi][mi]) {
+                    if (e.rest) continue
+                    val ly = mm?.notes?.getOrNull(e.heads[0].idx)?.let { lyricShown(it) } ?: continue
+                    need[e.onset] = max(need[e.onset] ?: 0f, textWidth(ly, LYRIC_SIZE) + 0.5f)
+                }
                 val keyState = HashMap<Char, Int>().also { st -> Pitch.STEPS.forEach { st[it] = Spell.keyAlter(s.fifths, it) } }
                 for (e in evs[pi][mi]) {
                     on += e.onset
@@ -147,7 +163,7 @@ object Engrave {
             for ((k, o) in list.withIndex()) {
                 val next = list.getOrNull(k + 1) ?: len
                 rel += x + (if (accAt[o] == true) 1.2f else 0f)
-                x += space((next - o) / div) + (if (accAt[o] == true) 1.2f else 0f)
+                x += max(space((next - o) / div), need[o] ?: 0f) + (if (accAt[o] == true) 1.2f else 0f)
             }
             cols += MeasureCol(len, list, rel, max(x + 0.2f, 7f))
         }
@@ -247,7 +263,10 @@ object Engrave {
                     else items += Line(cx + mw, a, cx + mw, b, 0.16f)
                 }
                 // número do compasso no início do sistema
-                if (m == mi) items += Txt("${s.parts[0].measures.getOrNull(m)?.number ?: (m + 1)}", cx + 0.2f, sysTopY + 1.2f, 1.6f)
+                if (m == mi) {
+                    val hasHarm = (mi until end).any { mm -> s.parts.any { it.measures.getOrNull(mm)?.harmony?.isNotEmpty() == true } }
+                    items += Txt("${s.parts[0].measures.getOrNull(m)?.number ?: (m + 1)}", cx + 0.2f, sysTopY + (if (hasHarm) -0.6f else 1.2f), 1.6f)
+                }
                 cx += mw
             }
             systems += SSystem(sysTopY, sysBottom, x0, xEnd, measures, s.parts.indices.map { partY[it]!! })
@@ -279,6 +298,7 @@ object Engrave {
             val v = valueOf(q)
             val voiceRank = voices.indexOf(e.voice)
             val onsetQ = startQ + e.onset / div
+            if (!e.rest) measure.notes.getOrNull(e.heads[0].idx)?.let { lyricShown(it) }?.let { items += Txt(it, x - 0.1f, top + 4f + 3.7f, LYRIC_SIZE) }
             if (e.rest) {
                 val whole = e.dur >= bar && !multiVoice
                 val lvl = if (whole) 0 else v.level
@@ -368,6 +388,10 @@ object Engrave {
                 stems += StemRec(l, e, x, stemX, tip, up, v.level, ids[0], e.voice, e.onset)
             }
             // ligaduras de valor
+        }
+        for (h in measure.harmony) {
+            val k = col.onsets.indexOf(h.at.coerceIn(0, bar - 1))
+            if (k >= 0) items += Txt(h.text(), absX[k] - 0.1f, top - 1.7f, CHORD_SIZE, true)
         }
         flushStems(s, col, part, top, items, mIdx, div)
     }
