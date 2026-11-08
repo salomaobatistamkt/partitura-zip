@@ -2,7 +2,18 @@
 
 Aplicativo de partituras para celular e tablet. Funciona offline.
 
-## O que o app faz hoje (v0.4)
+## Novidades da v0.5
+- **Criatividade** (aba nova): cole uma letra, escolha tonalidade (maior/menor), compasso (14 fórmulas), andamento e ritmo. O app separa as sílabas
+  (português), distribui em tempos fortes/fracos, cria melodia com cadência por verso e escolhe os acordes; a letra sai embaixo das notas e as cifras em cima.
+  Depois: arranjo de piano (6 estilos), vozes extras (coral contralto/tenor/baixo sem quintas ou oitavas paralelas, segunda voz em terças ou sextas,
+  linha de baixo) e edição de cada acorde. "Variação" gera outra versão. São regras musicais fixas, não IA generativa nem rede.
+- **Estúdio**: duplicar, inserir, copiar, colar e limpar compasso, oitava do compasso, sílaba por nota (a-le-gri) e acorde digitado (Am7, B♭/D).
+- **Compassos**: 1 a 16 tempos com 2, 4, 8 ou 16; criar com número de compassos digitado; vários instrumentos e vozes (contralto, tenor…) na criação.
+- **Regência**: padrões revistos, com variantes para compassos irregulares (5 = 3+2 ou 2+3 etc.).
+- **Servidor privado**: escondido, só abre pelos Ajustes e com o bloqueio do tablet; pareamento por código, chave guardada no cofre do Android.
+- Menu lateral recolhível ou escondido.
+
+## O que o app faz hoje (v0.5)
 - **Abrir**: MusicXML (.musicxml, .xml, .mxl), inclusive arquivos do MuseScore/Finale com piano de duas pautas.
   PDF e foto: pelo servidor de leitura em `omr-server/` (ver README dele).
 - **Estúdio**: pauta com notação de verdade (fonte Bravura: clave de Sol e Fá, vigas, ligaduras, acidentes, armadura, compasso),
