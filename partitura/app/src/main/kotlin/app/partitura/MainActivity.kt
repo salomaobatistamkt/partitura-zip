@@ -41,9 +41,21 @@ class MainActivity : ComponentActivity() {
         pending = null
     }
 
+    private val credential = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        if (r.resultCode == android.app.Activity.RESULT_OK) state.unlockServer()
+    }
+
+    override fun onStop() { state.lockServer(); super.onStop() }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Fonts.init(assets)
+        state.requestUnlock = {
+            val km = getSystemService(KEYGUARD_SERVICE) as android.app.KeyguardManager
+            @Suppress("DEPRECATION")
+            val i = km.createConfirmDeviceCredentialIntent("Servidor privado", "Confirme que é você para abrir a chave do servidor.")
+            if (i != null) credential.launch(i) else state.message = "Este tablet não tem bloqueio de tela."
+        }
         state.openPicker = { opener.launch(arrayOf("*/*")) }
         state.saveAs = { name, bytes -> pending = bytes; saver.launch(name) }
         setContent { PartituraTheme(state.dark) { Surface(color = MaterialTheme.colorScheme.background) { Root(state) } } }
@@ -61,9 +73,9 @@ private val AREAS = listOf(
     Area(3, "Teoria", "Escalas e círculo", Ic.THEORY, Sky),
     Area(4, "Transpor", "Mudar de tom", Ic.SWAP, Sky),
     Area(5, "Arquivos", "Salvar e exportar", Ic.FOLDER, Mint),
-    Area(6, "Servidor", "Ler PDF e foto", Ic.SERVER, Mint),
+    Area(6, "Servidor", "Ler PDF e foto", Ic.SERVER, Mint),   // escondido: só abre por Ajustes → Servidor privado
 )
-private val SECTIONS = listOf("CRIAR" to listOf(0, 1, 2), "APRENDER" to listOf(3, 4), "ARQUIVOS" to listOf(5, 6))
+private val SECTIONS = listOf("CRIAR" to listOf(0, 1, 2), "APRENDER" to listOf(3, 4), "ARQUIVOS" to listOf(5))
 private val PHONE_TABS = listOf(0, 1, 2, 3, 7)
 
 @Composable
@@ -72,6 +84,7 @@ fun Root(state: AppState) {
     val snack = remember { SnackbarHostState() }
     state.goStudio = { tab = 1 }
     state.goServer = { tab = 6 }
+    state.goHome = { tab = 0 }
     LaunchedEffect(state.message) { state.message?.let { snack.showSnackbar(it); state.message = null } }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 720.dp
@@ -118,15 +131,15 @@ fun Root(state: AppState) {
         AlertDialog(
             onDismissRequest = {}, confirmButton = {},
             title = { Text("Lendo a partitura…") },
-            text = { Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { CircularProgressIndicator(); Spacer(Modifier.height(12.dp)); Text("O servidor está reconhecendo as notas. Pode levar um minuto.") } },
+            text = { Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { CircularProgressIndicator(); Spacer(Modifier.height(12.dp)); Text(if (state.importStage.isBlank()) "O servidor está reconhecendo as notas. Pode levar um minuto." else state.importStage.replaceFirstChar { it.uppercase() } + "…") } },
         )
     }
     if (state.needOmr) {
         AlertDialog(
             onDismissRequest = { state.needOmr = false },
             title = { Text("Ler PDF e foto") },
-            text = { Text("Reconhecer notas em PDF ou foto precisa de um servidor de leitura, que ainda não está configurado. A tela Servidor mostra o passo a passo para colocá-lo no ar e testar a conexão. Enquanto isso, abra arquivos MusicXML.") },
-            confirmButton = { Button(onClick = { state.needOmr = false; tab = 6 }) { Text("Abrir tela Servidor") } },
+            text = { Text("Reconhecer notas em PDF ou foto precisa do seu servidor de leitura privado, ainda não pareado com este aparelho. Em Ajustes → Servidor privado há o passo a passo (protegido pelo bloqueio do tablet). Enquanto isso, abra arquivos MusicXML.") },
+            confirmButton = { Button(onClick = { state.needOmr = false; tab = 6 }) { Text("Abrir Servidor privado") } },
             dismissButton = { TextButton(onClick = { state.needOmr = false }) { Text("Agora não") } },
         )
     }
@@ -136,7 +149,7 @@ fun Root(state: AppState) {
 private fun MoreScreen(go: (Int) -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Mais", style = MaterialTheme.typography.headlineMedium)
-        listOf(4, 5, 6).forEach { i ->
+        listOf(4, 5).forEach { i ->
             val a = AREAS[i]
             Row(
                 Modifier.fillMaxWidth().clip(MaterialTheme.shapes.large).background(MaterialTheme.colorScheme.surface).clickable { go(i) }.padding(14.dp),

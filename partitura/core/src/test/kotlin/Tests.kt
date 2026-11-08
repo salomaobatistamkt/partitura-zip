@@ -357,6 +357,12 @@ fun main() {
         val cl = Synth.clickLoopLens(listOf(1.0, 1.0, 1.5), 0.5)
         check("Metrônomo de gestos desiguais dura 3,5 semínimas (${cl.size})", Math.abs(cl.size - 3.5 * 0.5 * 44100) < 2)
     }
+    check("Rede privada: 192.168.x, 10.x, Tailscale, .local, localhost sim; IP público e domínio não",
+        listOf("192.168.0.10", "10.1.2.3", "172.20.0.5", "100.101.5.6", "meu-pc.local", "localhost", "meupc").all { isPrivateHost(it) } &&
+        listOf("8.8.8.8", "172.32.0.1", "100.200.1.1", "omr.exemplo.com", "192.169.0.1").none { isPrivateHost(it) })
+    check("Endereço do servidor: esquema certo por padrão e http público recusado",
+        cleanServer("192.168.0.10:8080") == "http://192.168.0.10:8080" && cleanServer("omr.exemplo.com/omr?token=x") == "https://omr.exemplo.com" &&
+        serverProblem("http://omr.exemplo.com") != null && serverProblem("http://192.168.0.10:8080") == null && serverProblem("https://omr.exemplo.com") == null && serverProblem("") != null)
     check("Nomes em cifra", Names.key(-3) == "E♭" && Names.key(0) == "C" && Names.minorKey(0) == "A" && Names.step('F', 1) == "F♯" && Names.pitch(Pitch('B', -1, 3)) == "B♭3")
     println(if (fails == 0) "TODOS OS TESTES PASSARAM" else "$fails FALHAS")
     kotlin.system.exitProcess(if (fails == 0) 0 else 1)

@@ -153,10 +153,10 @@ private fun SettingsDialog(state: AppState, onClose: () -> Unit) {
                 Column {
                     Text("Leitura de PDF e foto", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        if (state.serverUrl.isBlank()) "Servidor ainda não configurado." else "Servidor: ${state.serverUrl}",
+                        if (!state.paired) "Servidor privado ainda não pareado." else "Servidor privado pareado (a chave fica criptografada).",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    TextButton(onClick = { onClose(); state.goServer() }, contentPadding = PaddingValues(0.dp)) { Text("Abrir tela Servidor") }
+                    TextButton(onClick = { onClose(); state.goServer() }, contentPadding = PaddingValues(0.dp)) { Text("Servidor privado…") }
                 }
                 Text("Ainda não existe", style = MaterialTheme.typography.titleSmall)
                 Text(

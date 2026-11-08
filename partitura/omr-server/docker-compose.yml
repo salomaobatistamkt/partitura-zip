@@ -3,6 +3,11 @@ services:
     build: .
     restart: unless-stopped
     environment:
-      - OMR_TOKEN=${OMR_TOKEN}
+      - DISCOVERY=${DISCOVERY:-0}
+    volumes:
+      - omr-data:/app/data      # guarda os aparelhos pareados
     ports:
-      - "8080:8080"
+      # só este computador por padrão. Para a rede de casa, troque por "8080:8080".
+      - "127.0.0.1:8080:8080"
+volumes:
+  omr-data:

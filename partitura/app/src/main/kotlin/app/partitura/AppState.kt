@@ -171,15 +171,6 @@ class Player {
     fun release() { stop(); keyTracks.forEach { try { it.release() } catch (_: Exception) {} }; keyTracks.clear() }
 }
 
-/** Aceita "https://dominio", "https://dominio/omr" ou o formato antigo "…/omr?token=x" e devolve só a base. */
-fun cleanServer(raw: String): String {
-    var u = raw.trim().substringBefore("?").trimEnd('/')
-    if (u.endsWith("/omr")) u = u.removeSuffix("/omr")
-    if (u.isNotEmpty() && !u.startsWith("http://") && !u.startsWith("https://")) u = "https://$u"
-    return u.trimEnd('/')
-}
-private fun tokenFromOld(raw: String): String = Regex("[?&]token=([^&]+)").find(raw)?.groupValues?.get(1) ?: ""
-
 class AppState(private val app: Context) {
     private val prefs = app.getSharedPreferences("partitura", Context.MODE_PRIVATE)
     var score by mutableStateOf<Score?>(null)
@@ -193,8 +184,22 @@ class AppState(private val app: Context) {
     /** Endereço do servidor de leitura (sem /omr) e chave de acesso opcional. */
     var serverUrl by mutableStateOf(cleanServer(prefs.getString("omr_url", "") ?: ""))
         private set
-    var serverToken by mutableStateOf(prefs.getString("omr_token", null) ?: tokenFromOld(prefs.getString("omr_url", "") ?: ""))
+    /** Aparelho pareado com o servidor? (a chave em si fica criptografada no Keystore e só é lida na hora de usar) */
+    var paired by mutableStateOf(!prefs.getString("omr_tok_enc", null).isNullOrBlank())
         private set
+    /** Tela Servidor destrancada até este instante (ms). Trancada de novo ao sair do app. */
+    var serverUnlockedUntil by mutableLongStateOf(0L)
+        private set
+    var requestUnlock: () -> Unit = {}
+    val serverUnlocked: Boolean get() = System.currentTimeMillis() < serverUnlockedUntil
+    fun unlockServer() { serverUnlockedUntil = System.currentTimeMillis() + 5 * 60_000L }
+    fun lockServer() { serverUnlockedUntil = 0L }
+    val hasPin: Boolean get() = !prefs.getString("srv_pin", null).isNullOrBlank()
+    fun setPin(pin: String) { prefs.edit().putString("srv_pin", Vault.hashPin(pin)).apply() }
+    fun tryPin(pin: String): Boolean = Vault.checkPin(pin, prefs.getString("srv_pin", "") ?: "").also { if (it) unlockServer() }
+    private fun token(): String = Vault.decrypt(prefs.getString("omr_tok_enc", "") ?: "") ?: ""
+    /** Texto do progresso da leitura de PDF/foto (para o aviso na tela). */
+    var importStage by mutableStateOf("")
     var message by mutableStateOf<String?>(null)
     var projectName by mutableStateOf<String?>(null)
     var tempo by mutableIntStateOf(100)
@@ -210,6 +215,7 @@ class AppState(private val app: Context) {
     var needOmr by mutableStateOf(false)
     var goStudio: () -> Unit = {}
     var goServer: () -> Unit = {}
+    var goHome: () -> Unit = {}
     /** Duração usada pelas teclas ao escrever (em semínimas) e se é pontuada. */
     var inputDur by mutableDoubleStateOf(1.0)
     var inputDot by mutableStateOf(false)
@@ -222,10 +228,18 @@ class AppState(private val app: Context) {
     var sideMode by mutableIntStateOf(prefs.getInt("side", -1))
     fun applySide(v: Int) { sideMode = v; prefs.edit().putInt("side", v).apply() }
     fun applyDark(v: Boolean) { dark = v; prefs.edit().putBoolean("dark", v).apply() }
-    fun applyServer(url: String, token: String) {
-        serverUrl = cleanServer(url); serverToken = token.trim()
-        prefs.edit().putString("omr_url", serverUrl).putString("omr_token", serverToken).apply()
+    init {
+        // migração: a chave antiga (texto puro) vira texto cifrado e o original é apagado
+        val old = prefs.getString("omr_token", null)
+        if (old != null) {
+            val enc = if (old.isNotBlank()) Vault.encrypt(old) else null
+            prefs.edit().remove("omr_token").apply { if (enc != null) putString("omr_tok_enc", enc) }.apply()
+            paired = enc != null
+        }
     }
+    fun saveServerUrl(url: String) { serverUrl = cleanServer(url); prefs.edit().putString("omr_url", serverUrl).apply() }
+    /** Esquece a chave e o endereço neste aparelho (não avisa o servidor). */
+    fun forgetServer() { prefs.edit().remove("omr_tok_enc").remove("omr_url").apply(); paired = false; serverUrl = "" }
 
     private val undo = ArrayDeque<Score>()
     private val redo = ArrayDeque<Score>()
@@ -426,71 +440,153 @@ class AppState(private val app: Context) {
         }
     }
 
+    private fun post(main: (() -> Unit)) = Handler(Looper.getMainLooper()).post { main() }
+
+    private class Http(val code: Int, val body: ByteArray) { val text get() = String(body) }
+
+    private fun call(method: String, url: String, token: String?, body: ByteArray? = null, ctype: String = "application/octet-stream", timeout: Int = 15000): Http {
+        val c = URL(url).openConnection() as HttpURLConnection
+        c.requestMethod = method; c.connectTimeout = 8000; c.readTimeout = timeout
+        if (!token.isNullOrBlank()) c.setRequestProperty("Authorization", "Bearer $token")
+        if (body != null) { c.doOutput = true; c.setRequestProperty("Content-Type", ctype); c.setFixedLengthStreamingMode(body.size); c.outputStream.use { it.write(body) } }
+        val code = c.responseCode
+        val data = (if (code in 200..299) c.inputStream else c.errorStream)?.use { it.readBytes() } ?: ByteArray(0)
+        return Http(code, data)
+    }
+
+    private fun explain(e: Exception): String = when (e) {
+        is javax.net.ssl.SSLException -> "Problema de certificado HTTPS (${e.message?.take(80)})."
+        is java.net.UnknownHostException -> "Não achei esse endereço. Confira se está certo e se o tablet está na mesma rede do computador."
+        is java.net.SocketTimeoutException -> "O servidor não respondeu a tempo. Confira se está ligado e se o tablet está na mesma rede."
+        is java.net.ConnectException -> "Conexão recusada. O servidor está ligado? A porta está certa?"
+        else -> "Não consegui conectar (${e.message?.take(100)})."
+    }
+
+    private fun httpError(code: Int, text: String): String = when (code) {
+        401 -> "O servidor recusou a chave. Pareie de novo (Ajustes → Servidor privado)."
+        429 -> "Muitas tentativas erradas: o servidor bloqueou este aparelho por alguns minutos."
+        404 -> "Esse endereço não é do servidor de leitura (erro 404)."
+        413 -> "Arquivo grande demais (limite 40 MB)."
+        502, 503, 504 -> "O servidor demorou ou está fora do ar (erro $code)."
+        else -> "O servidor respondeu $code: " + text.take(200)
+    }
+
+    /** Lê PDF/foto pelo servidor privado: envia, acompanha o progresso e abre o MusicXML devolvido. */
     private fun readWithServer(bytes: ByteArray, kind: String) {
-        if (serverUrl.isBlank()) { needOmr = true; return }
-        importing = true
-        val base = serverUrl; val token = serverToken
+        if (serverUrl.isBlank() || !paired) { needOmr = true; return }
+        serverProblem(serverUrl)?.let { message = it; return }
+        importing = true; importStage = "enviando"
+        val base = serverUrl; val token = token()
         thread {
             var err: String? = null
             try {
-                val c = URL("$base/omr").openConnection() as HttpURLConnection
-                c.requestMethod = "POST"; c.doOutput = true
-                c.connectTimeout = 15000; c.readTimeout = 600000
-                c.setRequestProperty("Content-Type", if (kind == "pdf") "application/pdf" else "application/octet-stream")
-                if (token.isNotBlank()) c.setRequestProperty("Authorization", "Bearer $token")
-                c.setFixedLengthStreamingMode(bytes.size)
-                c.outputStream.use { it.write(bytes) }
-                val code = c.responseCode
-                val body = (if (code in 200..299) c.inputStream else c.errorStream)?.use { it.readBytes() } ?: ByteArray(0)
-                if (code in 200..299) {
-                    val s = MusicXml.parseAny(body)
-                    Handler(Looper.getMainLooper()).post { importing = false; open(s, null); message = "Partitura lida: ${s.title}. Confira as notas — leitura óptica pode errar."; goStudio() }
-                    return@thread
+                val j = call("POST", "$base/jobs", token, bytes, if (kind == "pdf") "application/pdf" else "application/octet-stream", 120000)
+                if (j.code != 202) err = httpError(j.code, j.text) else {
+                    val id = Regex("\"id\"\\s*:\\s*\"([0-9a-f]+)\"").find(j.text)?.groupValues?.get(1) ?: throw RuntimeException("resposta inesperada")
+                    val t0 = System.currentTimeMillis()
+                    while (err == null) {
+                        Thread.sleep(1500)
+                        val st = call("GET", "$base/jobs/$id", token)
+                        if (st.code != 200) { err = httpError(st.code, st.text); break }
+                        val t = st.text
+                        val status = Regex("\"status\"\\s*:\\s*\"(\\w+)\"").find(t)?.groupValues?.get(1)
+                        val stage = Regex("\"stage\"\\s*:\\s*\"([^\"]*)\"").find(t)?.groupValues?.get(1) ?: ""
+                        val pg = Regex("\"page\"\\s*:\\s*(\\d+)").find(t)?.groupValues?.get(1); val pgs = Regex("\"pages\"\\s*:\\s*(\\d+)").find(t)?.groupValues?.get(1)
+                        post { importStage = stage + (if (pg != null && pgs != null && pgs != "1") " · página $pg de $pgs" else "") }
+                        if (status == "error") { err = Regex("\"error\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").find(t)?.groupValues?.get(1)?.replace("\\\"", "\"") ?: "falha na leitura"; break }
+                        if (status == "done") {
+                            val r = call("GET", "$base/jobs/$id/result", token, timeout = 60000)
+                            if (r.code != 200) { err = httpError(r.code, r.text); break }
+                            val sc = MusicXml.parseAny(r.body)
+                            post { importing = false; open(sc, null); message = "Partitura lida: ${sc.title}. Confira as notas — leitura óptica pode errar."; goStudio() }
+                            return@thread
+                        }
+                        if (System.currentTimeMillis() - t0 > 30 * 60_000L) err = "A leitura passou de 30 minutos; desisti."
+                    }
                 }
-                err = when (code) {
-                    401 -> "O servidor recusou a chave de acesso. Confira a chave na tela Servidor."
-                    404 -> "Endereço sem servidor de leitura (erro 404). Confira o endereço na tela Servidor."
-                    502, 503, 504 -> "O servidor demorou ou está fora do ar (erro $code). Tente de novo; PDFs grandes podem levar minutos."
-                    else -> "O servidor respondeu $code: " + String(body).take(200)
-                }
-            } catch (e: Exception) { err = "Não consegui falar com o servidor de leitura (${e.message}). Teste a conexão na tela Servidor." }
-            Handler(Looper.getMainLooper()).post { importing = false; message = err }
+            } catch (e: Exception) { err = explain(e) }
+            post { importing = false; message = err }
         }
     }
 
-    /** Testa o servidor: está no ar? a chave confere? Resultado em texto para a tela Servidor. */
-    fun testServer(url: String, token: String, done: (ok: Boolean, text: String) -> Unit) {
+    /** Pareia com o servidor usando o código mostrado nele; guarda a chave recebida criptografada. */
+    fun pairServer(url: String, code: String, done: (ok: Boolean, text: String) -> Unit) {
         val base = cleanServer(url)
-        if (base.isBlank()) { done(false, "Digite o endereço do servidor."); return }
+        serverProblem(base)?.let { done(false, it); return }
+        if (code.filter { it.isLetterOrDigit() }.length < 8) { done(false, "O código tem 8 letras/números (ex.: ABCD-2345)."); return }
         thread {
-            val t0 = System.currentTimeMillis()
-            var ok = false; var text = ""
+            var ok = false; var text: String
             try {
-                val c = URL("$base/health").openConnection() as HttpURLConnection
-                c.connectTimeout = 8000; c.readTimeout = 8000
-                val code = c.responseCode
-                val body = (if (code in 200..299) c.inputStream else c.errorStream)?.use { String(it.readBytes()) } ?: ""
-                val ms = System.currentTimeMillis() - t0
-                if (code !in 200..299 || !body.contains("\"ok\"")) {
-                    text = if (code == 404) "O endereço respondeu, mas não é o servidor de leitura (erro 404). Confira o endereço e se o deploy terminou."
-                    else "O endereço respondeu $code e não parece ser o servidor de leitura."
-                } else {
-                    val needs = body.contains("\"needs_token\": true") || body.contains("\"needs_token\":true")
-                    if (!needs) { ok = true; text = "Servidor no ar (${ms} ms). Não exige chave." }
-                    else {
-                        val c2 = URL("$base/check").openConnection() as HttpURLConnection
-                        c2.connectTimeout = 8000; c2.readTimeout = 8000
-                        if (token.isNotBlank()) c2.setRequestProperty("Authorization", "Bearer ${token.trim()}")
-                        val code2 = c2.responseCode
-                        if (code2 in 200..299) { ok = true; text = "Servidor no ar (${ms} ms) e a chave confere." }
-                        else text = "Servidor no ar, mas a chave não confere (erro $code2). Use a mesma chave que está em OMR_TOKEN no servidor."
+                val h = call("GET", "$base/health", null)
+                if (h.code != 200 || !h.text.contains("compasso-omr")) { post { done(false, "Esse endereço respondeu, mas não é o servidor do Compasso.") }; return@thread }
+                val device = (android.os.Build.MODEL ?: "tablet").replace("\"", "")
+                val r = call("POST", "$base/pair", null, "{\"code\":\"${code.trim().uppercase()}\",\"device\":\"$device\"}".toByteArray(), "application/json")
+                if (r.code == 200) {
+                    val tok = Regex("\"token\"\\s*:\\s*\"([^\"]+)\"").find(r.text)?.groupValues?.get(1)
+                    val enc = tok?.let { Vault.encrypt(it) }
+                    if (enc == null) text = "Pareou, mas o Android não deixou guardar a chave com segurança. Nada foi salvo."
+                    else { prefs.edit().putString("omr_tok_enc", enc).putString("omr_url", base).apply(); ok = true; text = "Pareado! A chave ficou guardada criptografada neste aparelho." }
+                } else text = if (r.code == 401) "Código errado ou vencido. Peça um novo no computador: python server.py --new-code" else httpError(r.code, r.text)
+            } catch (e: Exception) { text = explain(e) }
+            post { if (ok) { serverUrl = base; paired = true }; done(ok, text) }
+        }
+    }
+
+    /** Testa a conexão com o servidor já pareado. */
+    fun testServer(done: (ok: Boolean, text: String) -> Unit) {
+        if (serverUrl.isBlank() || !paired) { done(false, "Ainda não pareado."); return }
+        serverProblem(serverUrl)?.let { done(false, it); return }
+        val base = serverUrl; val tok = token()
+        thread {
+            var ok = false; var text: String
+            try {
+                val t0 = System.currentTimeMillis()
+                val h = call("GET", "$base/health", null)
+                if (h.code != 200 || !h.text.contains("compasso-omr")) text = "O endereço respondeu, mas não é o servidor do Compasso."
+                else {
+                    val c = call("GET", "$base/check", tok)
+                    val ms = System.currentTimeMillis() - t0
+                    if (c.code == 200) { ok = true; text = "Conectado (${ms} ms) e a chave confere." } else text = httpError(c.code, c.text)
+                }
+            } catch (e: Exception) { text = explain(e) }
+            post { done(ok, text) }
+        }
+    }
+
+    /** Desconecta este aparelho: avisa o servidor (se alcançar) e apaga a chave daqui. */
+    fun unpairServer(done: (String) -> Unit) {
+        val base = serverUrl; val tok = token()
+        thread {
+            var warn = ""
+            try { call("POST", "$base/unpair", tok, ByteArray(0)) } catch (e: Exception) { warn = " (o servidor não foi avisado: ${e.message?.take(60)} — use --revoke-all nele)" }
+            post { forgetServer(); done("Aparelho desconectado.$warn") }
+        }
+    }
+
+    /** Procura servidores do Compasso na rede local (broadcast UDP; só funciona se o servidor foi iniciado com DISCOVERY=1, como nos scripts run-local). */
+    fun discoverServers(done: (List<String>) -> Unit) {
+        thread {
+            val found = LinkedHashSet<String>()
+            try {
+                java.net.DatagramSocket().use { sock ->
+                    sock.broadcast = true; sock.soTimeout = 700
+                    val msg = "COMPASSO?".toByteArray()
+                    sock.send(java.net.DatagramPacket(msg, msg.size, java.net.InetAddress.getByName("255.255.255.255"), 45678))
+                    val end = System.currentTimeMillis() + 2500
+                    val buf = ByteArray(512)
+                    while (System.currentTimeMillis() < end) {
+                        try {
+                            val pk = java.net.DatagramPacket(buf, buf.size); sock.receive(pk)
+                            val t = String(pk.data, 0, pk.length)
+                            if (t.contains("compasso-omr")) {
+                                val port = Regex("\"port\"\\s*:\\s*(\\d+)").find(t)?.groupValues?.get(1) ?: "8080"
+                                found += "http://${pk.address.hostAddress}:$port"
+                            }
+                        } catch (_: java.net.SocketTimeoutException) {}
                     }
                 }
-            } catch (e: javax.net.ssl.SSLException) { text = "Problema de certificado HTTPS (${e.message?.take(80)}). Espere o domínio emitir o certificado ou use http:// só para teste."
-            } catch (e: java.net.UnknownHostException) { text = "Não achei esse endereço. Confira se o domínio existe e aponta para o servidor."
-            } catch (e: java.net.SocketTimeoutException) { text = "O servidor não respondeu em 8 segundos. Confira se está ligado e se a porta está aberta."
-            } catch (e: Exception) { text = "Não consegui conectar (${e.message?.take(100)})." }
-            Handler(Looper.getMainLooper()).post { done(ok, text) }
+            } catch (_: Exception) {}
+            post { done(found.toList()) }
         }
     }
 }
