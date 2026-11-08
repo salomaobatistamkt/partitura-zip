@@ -151,7 +151,7 @@ object MusicXml {
                 score.parts += np
             }
         }
-        require(score.parts.any { pt -> pt.measures.any { it.notes.isNotEmpty() } }) { "A partitura não contém notas" }
+        require(score.parts.any { pt -> pt.measures.isNotEmpty() }) { "A partitura não contém compassos" }
         return score
     }
 

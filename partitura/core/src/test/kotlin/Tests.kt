@@ -121,6 +121,36 @@ fun main() {
         check("Toque acima da pauta 1 acha a nota da parte 0", SceneHit.nearestInPart(hitScene, first0.x + 0.7f, sy.staffTops[0] - 1f, 0) == first0.note)
         check("Mesmo x na parte 1 acha a nota do baixo", SceneHit.nearestInPart(hitScene, first1.x + 0.7f, sy.staffTops[1] + 2f, 1) == first1.note)
     }
+    run {
+        // robustez: partituras aleatórias (vozes, acordes, pausas, durações estranhas) nunca podem derrubar o app
+        val rnd = java.util.Random(42)
+        var bad = 0
+        repeat(300) { iter ->
+            val sc = Score("f$iter", intArrayOf(1, 2, 4, 8, 12)[rnd.nextInt(5)], rnd.nextInt(13) - 6, 2 + rnd.nextInt(5), intArrayOf(4, 8)[rnd.nextInt(2)], 60 + rnd.nextInt(100))
+            repeat(1 + rnd.nextInt(3)) { pi ->
+                val p = Part("P$pi", "x", mutableListOf(), if (rnd.nextBoolean()) 'G' else 'F', if (rnd.nextBoolean()) "g" else "P$pi")
+                repeat(rnd.nextInt(6)) { mi ->
+                    val m = Measure(mi + 1)
+                    repeat(rnd.nextInt(9)) {
+                        val pitch = if (rnd.nextInt(4) == 0) null else Pitch(Pitch.STEPS[rnd.nextInt(7)], rnd.nextInt(3) - 1, 1 + rnd.nextInt(6))
+                        m.notes += Note(pitch, 1 + rnd.nextInt(sc.divisions * 5), 1 + rnd.nextInt(3), rnd.nextInt(4) == 0 && m.notes.isNotEmpty(), rnd.nextInt(5) == 0, rnd.nextInt(5) == 0)
+                    }
+                    p.measures += m
+                }
+                sc.parts += p
+            }
+            try {
+                val scene = Engrave.scene(sc, 20f + rnd.nextInt(120))
+                if (scene.items.any { it is Glyph && (it.x.isNaN() || it.y.isNaN()) }) bad++
+                scene.cursor(rnd.nextDouble() * 20); scene.soundingAt(rnd.nextDouble() * 20)
+                Synth.render(sc, 100).size; Midi.export(sc); MusicXml.write(sc)
+                if (sc.parts.isNotEmpty() && sc.parts.all { it.measures.isNotEmpty() } && sc.parts.any { p -> p.measures.any { m -> m.notes.isNotEmpty() } }) MusicXml.parseAny(MusicXml.write(sc).toByteArray())
+            } catch (e: Throwable) { bad++; if (bad < 4) println("fuzz $iter: $e ${e.stackTrace.take(3)}") }
+        }
+        check("Fuzz: 300 partituras aleatórias sem erro", bad == 0)
+    }
+    val emp = Edit.blank("e", 0, 4, 4, 1); Edit.delete(emp, 0, 0, 0)
+    check("Apagar a última nota deixa pausa de compasso (nunca compasso vazio)", emp.parts[0].measures[0].notes.size == 1 && Validate.measureDurations(emp).isEmpty())
     println(if (fails == 0) "TODOS OS TESTES PASSARAM" else "$fails FALHAS")
     kotlin.system.exitProcess(if (fails == 0) 0 else 1)
 }

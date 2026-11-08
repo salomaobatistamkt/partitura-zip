@@ -114,6 +114,7 @@ object Edit {
     fun delete(s: Score, p: Int, m: Int, n: Int) {
         val list = s.parts[p].measures.getOrNull(m)?.notes ?: return
         if (n in list.indices) list.removeAt(n)
+        if (list.isEmpty()) list.add(Note(null, s.divisions * 4 * s.beats / s.beatType))
     }
 
     fun addMeasure(s: Score) {

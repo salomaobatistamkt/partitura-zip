@@ -6,6 +6,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -24,3 +26,10 @@ jobs:
         with:
           name: partitura-debug-apk
           path: partitura/app/build/outputs/apk/debug/app-debug.apk
+      - name: Publicar APK na aba Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete apk-mais-recente --cleanup-tag -y || true
+          cp partitura/app/build/outputs/apk/debug/app-debug.apk Partitura.apk
+          gh release create apk-mais-recente Partitura.apk --title "Partitura - APK mais recente" --notes "APK de teste (debug) gerado automaticamente. Baixe o arquivo Partitura.apk abaixo e instale no tablet."
