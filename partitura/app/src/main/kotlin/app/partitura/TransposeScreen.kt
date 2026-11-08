@@ -48,7 +48,7 @@ fun TransposeScreen(state: AppState) {
         }
         SectionTitle("Instrumentos transpositores (altura escrita)")
         Wrap {
-            listOf("Si♭ (clarinete, trompete)" to 2, "Mi♭ (sax alto)" to 9, "Fá (trompa)" to 7).forEach { (n, k) ->
+            listOf("B♭ (clarinete, trompete)" to 2, "E♭ (sax alto)" to 9, "F (trompa)" to 7).forEach { (n, k) ->
                 FilterChip(selected = semis == k, onClick = { semis = k }, label = { Text(n) })
             }
         }

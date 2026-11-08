@@ -48,6 +48,7 @@ fun StudioScreen(state: AppState, wide: Boolean, goHome: () -> Unit) {
     val p = state.player
     var spDp by remember { mutableFloatStateOf(if (wide) 8.5f else 6.5f) }
     var showMixer by remember { mutableStateOf(false) }
+    var showInstr by remember { mutableStateOf(false) }
     var showPiano by remember { mutableStateOf(true) }
     var saveDlg by remember { mutableStateOf(false) }
     val scroll = rememberScrollState()
@@ -67,6 +68,7 @@ fun StudioScreen(state: AppState, wide: Boolean, goHome: () -> Unit) {
             }
             ToolBtn(Ic.EDIT, { state.editMode = !state.editMode }, selected = state.editMode)
             ToolBtn(Ic.SAVE, { if (state.projectName != null) state.save(state.projectName!!) else saveDlg = true })
+            ToolBtn(Ic.INSTR, { showInstr = true }, desc = "Instrumentos")
             ToolBtn(Ic.MIXER, { showMixer = true })
         }
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).onSizeChanged { viewport = it.height }) {
@@ -84,6 +86,17 @@ fun StudioScreen(state: AppState, wide: Boolean, goHome: () -> Unit) {
                     val sys = scene.systems[curSystem]
                     val top = sys.top * spPx; val bottom = sys.bottom * spPx
                     if (top < scroll.value || bottom > scroll.value + viewport) scroll.animateScrollTo((top - 12 * density).toInt().coerceAtLeast(0))
+                }
+            }
+            LaunchedEffect(selId, scene) {
+                if (state.editMode && selId >= 0 && !p.active) {
+                    val n = scene.notes[selId]
+                    val si = scene.systems.indexOfFirst { sys -> sys.measures.any { it.index == n.m } }
+                    if (si >= 0) {
+                        val sys = scene.systems[si]
+                        val top = sys.top * spPx; val bottom = sys.bottom * spPx
+                        if (top < scroll.value || bottom > scroll.value + viewport) scroll.animateScrollTo((top - 12 * density).toInt().coerceAtLeast(0))
+                    }
                 }
             }
             LaunchedEffect(activeMidi) {
@@ -160,16 +173,17 @@ fun StudioScreen(state: AppState, wide: Boolean, goHome: () -> Unit) {
             Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 8.dp, vertical = 6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     ToolBtn(Ic.BACK, { kbFirst = (kbFirst - 12).coerceAtLeast(24) })
-                    Text("Dó${kbFirst / 12 - 1} – Dó${kbLast / 12 - 1}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("C${kbFirst / 12 - 1} – C${kbLast / 12 - 1}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     ToolBtn(Ic.NEXT, { kbFirst = (kbFirst + 12).coerceAtMost(96 - 12 * octs) })
                     Spacer(Modifier.weight(1f))
-                    Text(if (state.editMode) "Teclas escrevem na nota selecionada" else "Toque para ouvir", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (state.editMode) "As teclas escrevem a nota na partitura" else "Toque para ouvir", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                PianoKeyboard(kbFirst, kbLast, pianoActive(state, p), marks, { m -> if (state.editMode) state.writeNote(m) else p.key(m) }, height = if (wide) 110.dp else 84.dp)
+                PianoKeyboard(kbFirst, kbLast, pianoActive(state, p), marks, { m -> if (state.editMode) state.writeNote(m) else p.key(m, state.timbreOf(state.selP)) }, height = if (wide) 110.dp else 84.dp)
             }
         }
     }
     if (showMixer) MixerSheet(state, s) { showMixer = false }
+    if (showInstr) InstrumentsSheet(state, s) { showInstr = false }
     if (saveDlg) {
         var name by remember { mutableStateOf(s.title) }
         AlertDialog(
@@ -196,41 +210,112 @@ private fun pianoActive(state: AppState, p: Player): Set<Int> {
     return set
 }
 
+private fun partLabel(s: Score, i: Int): String {
+    val p = s.parts[i]
+    val base = p.name.substringBefore(" (pauta").trim()
+    val staves = s.parts.count { it.group == p.group }
+    return if (staves > 1) "$base · ${if (p.clef == 'F') "F" else "G"}" else base
+}
+
 @Composable
 private fun EditPanel(state: AppState, s: Score) {
     val cur = state.currentNote()
     val part = s.parts.getOrNull(state.selP)
-    val desc = if (cur == null) "Toque numa nota ou pausa da pauta para editar." else {
-        val what = cur.pitch?.let { Names.pitch(it) } ?: "pausa"
-        "${part?.name ?: ""} · compasso ${state.selM + 1} · $what · ${durName(cur.duration.toDouble() / s.divisions)}"
+    val bars = s.parts.firstOrNull()?.measures?.size ?: 0
+    val dur = durName(state.effDur)
+    val desc = when {
+        cur == null -> "Escrevendo em ${part?.let { partLabel(s, state.selP) } ?: ""} · $dur · toque nas teclas do piano (continua de onde parou)"
+        cur.pitch == null -> "Compasso ${state.selM + 1} de $bars · ${part?.let { partLabel(s, state.selP) } ?: ""} · próxima nota: $dur · toque nas teclas"
+        else -> "Nota selecionada: ${Names.pitch(cur.pitch!!)} · ${durName(cur.duration.toDouble() / s.divisions)} · compasso ${state.selM + 1} de $bars"
     }
+    val onNote = cur?.pitch != null
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(desc, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(desc, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        if (s.parts.size > 1) {
+            Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Escrever em", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                s.parts.indices.forEach { i ->
+                    FilterChip(selected = state.selP == i, onClick = { state.selP = i; val e = state.endPosition(i); state.select(i, e.first, e.second) }, label = { Text(partLabel(s, i), maxLines = 1) })
+                }
+            }
+        }
         Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             DURS.forEach { (g, q) ->
-                GlyphBtn(g, { state.edit { Edit.setDurationSmart(it, state.selP, state.selM, state.selN, q) } },
-                    selected = cur != null && cur.duration == (q * s.divisions).toInt(), enabled = cur != null)
+                GlyphBtn(g, {
+                    state.inputDur = q
+                    if (onNote) state.edit { Edit.setDurationSmart(it, state.selP, state.selM, state.selN, if (state.inputDot && q > 0.25) q * 1.5 else q) }
+                }, selected = state.inputDur == q)
             }
-            GlyphBtn(0xE1E7, { state.edit { Edit.toggleDot(it, state.selP, state.selM, state.selN) } }, enabled = cur != null, size = 16)
+            GlyphBtn(0xE1E7, {
+                state.inputDot = !state.inputDot
+                if (onNote) state.edit { Edit.toggleDot(it, state.selP, state.selM, state.selN) }
+            }, selected = state.inputDot, size = 16)
+            GlyphBtn(0xE4E5, { state.writeRest() }, size = 16)
             Spacer(Modifier.width(8.dp))
-            GlyphBtn(Engrave.SHARP, { state.edit { Edit.setAlter(it, state.selP, state.selM, state.selN, 1) } }, enabled = cur?.pitch != null)
-            GlyphBtn(Engrave.FLAT, { state.edit { Edit.setAlter(it, state.selP, state.selM, state.selN, -1) } }, enabled = cur?.pitch != null)
-            GlyphBtn(Engrave.NATURAL, { state.edit { Edit.setAlter(it, state.selP, state.selM, state.selN, 0) } }, enabled = cur?.pitch != null)
+            GlyphBtn(Engrave.SHARP, { state.edit { Edit.setAlter(it, state.selP, state.selM, state.selN, 1) } }, enabled = onNote)
+            GlyphBtn(Engrave.FLAT, { state.edit { Edit.setAlter(it, state.selP, state.selM, state.selN, -1) } }, enabled = onNote)
+            GlyphBtn(Engrave.NATURAL, { state.edit { Edit.setAlter(it, state.selP, state.selM, state.selN, 0) } }, enabled = onNote)
             Spacer(Modifier.width(8.dp))
-            GlyphBtn(0xE4E5, { state.edit { Edit.toggleRest(it, state.selP, state.selM, state.selN) } }, enabled = cur != null, size = 16)
-            TextBtn("Ligadura", { state.edit { Edit.toggleTie(it, state.selP, state.selM, state.selN) } }, selected = cur?.tieStart == true, enabled = cur?.pitch != null)
-            TextBtn("↑ ½ tom", { state.edit { Edit.shiftSemitones(it, state.selP, state.selM, state.selN, 1) } }, enabled = cur?.pitch != null)
-            TextBtn("↓ ½ tom", { state.edit { Edit.shiftSemitones(it, state.selP, state.selM, state.selN, -1) } }, enabled = cur?.pitch != null)
+            TextBtn("Ligadura", { state.edit { Edit.toggleTie(it, state.selP, state.selM, state.selN) } }, selected = cur?.tieStart == true, enabled = onNote)
+            TextBtn("↑ ½ tom", { state.edit { Edit.shiftSemitones(it, state.selP, state.selM, state.selN, 1) } }, enabled = onNote)
+            TextBtn("↓ ½ tom", { state.edit { Edit.shiftSemitones(it, state.selP, state.selM, state.selN, -1) } }, enabled = onNote)
         }
         Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            TextBtn("Escrever tocando na pauta", { state.drawTool = !state.drawTool }, selected = state.drawTool)
+            TextBtn("+ compasso", { state.edit { Edit.addMeasure(it) } })
+            TextBtn("+ 4 compassos", { state.edit { Edit.addMeasures(it, 4) } })
             TextBtn("Inserir nota", { state.edit { st -> state.selN = Edit.insertAfter(st, state.selP, state.selM, state.selN) } }, enabled = cur != null)
             TextBtn("Apagar nota", { state.edit { Edit.delete(it, state.selP, state.selM, state.selN) } }, enabled = cur != null)
-            TextBtn("+ compasso", { state.edit { Edit.addMeasure(it) } })
-            TextBtn("− compasso ${state.selM + 1}", { state.edit { Edit.deleteMeasure(it, state.selM) } }, enabled = s.parts.firstOrNull()?.measures?.let { it.size > 1 } == true)
+            TextBtn("− compasso ${state.selM + 1}", { state.edit { Edit.deleteMeasure(it, state.selM) } }, enabled = bars > 1)
+            TextBtn("Tocar na pauta", { state.drawTool = !state.drawTool }, selected = state.drawTool)
         }
         val issues = Validate.measureDurations(s)
         if (issues.isNotEmpty()) Text("Atenção: ${issues.size} compasso(s) com duração diferente de ${s.beats}/${s.beatType}. ${issues.first()}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error, maxLines = 2)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun InstrumentsSheet(state: AppState, s: Score, onClose: () -> Unit) {
+    val groups = s.parts.indices.filter { i -> s.parts.indexOfFirst { it.group == s.parts[i].group } == i }
+    val bars = s.parts.firstOrNull()?.measures?.size ?: 0
+    ModalBottomSheet(onDismissRequest = onClose, containerColor = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Instrumentos", style = MaterialTheme.typography.titleLarge)
+            Text("${groups.size} na partitura · $bars compassos", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            groups.forEach { i ->
+                val part = s.parts[i]
+                var menu by remember { mutableStateOf(false) }
+                Row(
+                    Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(MaterialTheme.colorScheme.surfaceVariant).padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(part.name.substringBefore(" (pauta"), style = MaterialTheme.typography.titleSmall)
+                        val staves = s.parts.count { it.group == part.group }
+                        Text(if (staves > 1) "$staves pautas (G e F)" else "clave ${if (part.clef == 'F') "F" else "G"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Box {
+                        TextBtn("Som: ${Timbre.of(part.inst).label}", { menu = true })
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            Timbre.ALL.forEach { t -> DropdownMenuItem(text = { Text(t.label) }, onClick = { state.setSound(i, t.id); menu = false }) }
+                        }
+                    }
+                    ToolBtn(Ic.TRASH, { state.removeInstrument(i) }, enabled = groups.size > 1)
+                }
+            }
+            SectionTitle("Adicionar instrumento")
+            Wrap {
+                Instruments.CATALOG.forEach { inst ->
+                    AssistChip(onClick = { state.addInstrument(inst); state.editMode = true; onClose() }, label = { Text(inst.name + if (inst.staves == 2) " (2 pautas)" else "") })
+                }
+            }
+            Text(
+                "O instrumento entra com pausas em todos os compassos. Depois é só ligar o lápis (modo de escrita), escolher o instrumento em \"Escrever em\" e tocar as teclas do piano. " +
+                    "O som é sintetizado: aproxima o caráter de cada instrumento (violão e baixo decaem, órgão e cordas sustentam), mas não são gravações dos instrumentos reais. " +
+                    "As notas ficam na altura real (sem transposição de instrumento).",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

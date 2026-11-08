@@ -23,8 +23,10 @@ object Midi {
             items.sortWith(compareBy({ it.first }, { it.third }))
             val tr = ByteArrayOutputStream()
             if (pi == 0) { vlq(tr, 0); tr.write(byteArrayOf(0xFF.toByte(), 0x51, 3)); val mp = 60_000_000 / s.tempo; tr.write(mp shr 16 and 255); tr.write(mp shr 8 and 255); tr.write(mp and 255) }
+            val ch = (if (pi >= 9) pi + 1 else pi).coerceAtMost(15)
+            vlq(tr, 0); tr.write(0xC0 or ch); tr.write(Instruments.gm(s.parts[pi].inst))
             var last = 0
-            for ((tick, midi, on) in items) { vlq(tr, tick - last); last = tick; tr.write(if (on == 1) 0x90 else 0x80); tr.write(midi); tr.write(if (on == 1) 80 else 0) }
+            for ((tick, midi, on) in items) { vlq(tr, tick - last); last = tick; tr.write((if (on == 1) 0x90 else 0x80) or ch); tr.write(midi); tr.write(if (on == 1) 80 else 0) }
             vlq(tr, 0); tr.write(byteArrayOf(0xFF.toByte(), 0x2F, 0))
             out.write("MTrk".toByteArray()); be32(tr.size()); out.write(tr.toByteArray())
         }

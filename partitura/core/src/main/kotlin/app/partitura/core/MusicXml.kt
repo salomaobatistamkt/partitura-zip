@@ -75,15 +75,19 @@ object MusicXml {
         val root = doc.documentElement
         require(root.tagName == "score-partwise") { "Este arquivo não é MusicXML 'score-partwise' (encontrado: ${root.tagName})" }
         val names = root.kid("part-list")?.kids("score-part")?.associate { it.getAttribute("id") to (it.text("part-name") ?: it.getAttribute("id")) } ?: emptyMap()
+        val programs = root.kid("part-list")?.kids("score-part")?.mapNotNull { sp ->
+            sp.kids("midi-instrument").firstNotNullOfOrNull { it.text("midi-program")?.toIntOrNull() }?.let { sp.getAttribute("id") to (it - 1).coerceIn(0, 127) }
+        }?.toMap() ?: emptyMap()
         val title = root.kid("work")?.text("work-title")?.takeIf { it.isNotBlank() } ?: root.text("movement-title")?.takeIf { it.isNotBlank() } ?: "Sem título"
         val score = Score(title, 1, 0, 4, 4, 100)
         var gotKey = false; var gotTime = false; var gotTempo = false; var gotDiv = false
         for (p in root.kids("part")) {
             val id = p.getAttribute("id")
             val pname = names[id] ?: id
+            val timbre = programs[id]?.let { Instruments.timbreForProgram(it) } ?: Instruments.timbreForName(pname)
             // staff número -> Part (pianos têm 2 pautas na mesma parte)
             val staves = java.util.TreeMap<Int, Part>()
-            fun staffPart(n: Int): Part = staves.getOrPut(n) { Part(if (n == 1) id else "$id-$n", pname, mutableListOf(), if (n >= 2) 'F' else 'G', id) }
+            fun staffPart(n: Int): Part = staves.getOrPut(n) { Part(if (n == 1) id else "$id-$n", pname, mutableListOf(), if (n >= 2) 'F' else 'G', id, timbre.id) }
             val clefSet = HashSet<Int>()
             staffPart(1)
             var declaredStaves = 1
@@ -147,7 +151,7 @@ object MusicXml {
             }
             val multi = staves.size > 1
             for ((i, part) in staves) {
-                val np = if (multi) Part(part.id, "$pname (pauta $i)", part.measures, part.clef, id) else part
+                val np = if (multi) Part(part.id, "$pname (pauta $i)", part.measures, part.clef, id, part.inst) else part
                 score.parts += np
             }
         }
@@ -157,28 +161,60 @@ object MusicXml {
 
     fun write(s: Score): String {
         fun esc(t: String) = t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        // pautas do mesmo grupo (piano) viram uma só <part> com <staves>
+        val groups = ArrayList<MutableList<Part>>()
+        for (p in s.parts) { val g = groups.firstOrNull { it[0].group == p.group }; if (g != null) g += p else groups += mutableListOf(p) }
         val sb = StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<score-partwise version=\"4.0\">\n")
         sb.append("  <work><work-title>${esc(s.title)}</work-title></work>\n  <part-list>\n")
-        s.parts.forEach { sb.append("    <score-part id=\"${esc(it.id)}\"><part-name>${esc(it.name)}</part-name></score-part>\n") }
+        for (g in groups) {
+            val name = if (g.size > 1) g[0].name.substringBefore(" (pauta").trim() else g[0].name
+            val pid = if (g.size > 1) g[0].group else g[0].id
+            val prog = Instruments.gm(g[0].inst) + 1
+            sb.append("    <score-part id=\"${esc(pid)}\"><part-name>${esc(name)}</part-name><midi-instrument id=\"${esc(pid)}-i1\"><midi-channel>1</midi-channel><midi-program>$prog</midi-program></midi-instrument></score-part>\n")
+        }
         sb.append("  </part-list>\n")
-        for (p in s.parts) {
-            sb.append("  <part id=\"${esc(p.id)}\">\n")
-            p.measures.forEachIndexed { i, m ->
-                sb.append("    <measure number=\"${m.number}\">\n")
-                if (i == 0) sb.append("      <attributes><divisions>${s.divisions}</divisions><key><fifths>${s.fifths}</fifths></key><time><beats>${s.beats}</beats><beat-type>${s.beatType}</beat-type></time>${if (p.clef == 'F') "<clef><sign>F</sign><line>4</line></clef>" else "<clef><sign>G</sign><line>2</line></clef>"}</attributes>\n      <direction><sound tempo=\"${s.tempo}\"/></direction>\n")
-                for (n in m.notes) {
-                    sb.append("      <note>")
-                    if (n.chord) sb.append("<chord/>")
-                    val pt = n.pitch
-                    if (pt == null) sb.append("<rest/>") else {
-                        sb.append("<pitch><step>${pt.step}</step>")
-                        if (pt.alter != 0) sb.append("<alter>${pt.alter}</alter>")
-                        sb.append("<octave>${pt.octave}</octave></pitch>")
+        for (g in groups) {
+            val pid = if (g.size > 1) g[0].group else g[0].id
+            sb.append("  <part id=\"${esc(pid)}\">\n")
+            val nMeas = g.maxOf { it.measures.size }
+            for (i in 0 until nMeas) {
+                sb.append("    <measure number=\"${g[0].measures.getOrNull(i)?.number ?: (i + 1)}\">\n")
+                if (i == 0) {
+                    sb.append("      <attributes><divisions>${s.divisions}</divisions><key><fifths>${s.fifths}</fifths></key><time><beats>${s.beats}</beats><beat-type>${s.beatType}</beat-type></time>")
+                    if (g.size > 1) sb.append("<staves>${g.size}</staves>")
+                    g.forEachIndexed { k, pt ->
+                        val num = if (g.size > 1) " number=\"${k + 1}\"" else ""
+                        sb.append(if (pt.clef == 'F') "<clef$num><sign>F</sign><line>4</line></clef>" else "<clef$num><sign>G</sign><line>2</line></clef>")
                     }
-                    sb.append("<duration>${n.duration}</duration>")
-                    if (n.tieStop) sb.append("<tie type=\"stop\"/>")
-                    if (n.tieStart) sb.append("<tie type=\"start\"/>")
-                    sb.append("<voice>${n.voice}</voice></note>\n")
+                    sb.append("</attributes>\n      <direction><sound tempo=\"${s.tempo}\"/></direction>\n")
+                }
+                // blocos (pauta, voz): cada bloco volta ao início do compasso com <backup>
+                val blocks = ArrayList<Pair<Int, List<Note>>>()
+                g.forEachIndexed { k, pt ->
+                    val notes = pt.measures.getOrNull(i)?.notes ?: emptyList()
+                    for (v in notes.map { it.voice }.distinct().sorted()) blocks += (k + 1) to notes.filter { it.voice == v }
+                }
+                blocks.forEachIndexed { bi, (staff, notes) ->
+                    for (n in notes) {
+                        sb.append("      <note>")
+                        if (n.chord) sb.append("<chord/>")
+                        val pt = n.pitch
+                        if (pt == null) sb.append("<rest/>") else {
+                            sb.append("<pitch><step>${pt.step}</step>")
+                            if (pt.alter != 0) sb.append("<alter>${pt.alter}</alter>")
+                            sb.append("<octave>${pt.octave}</octave></pitch>")
+                        }
+                        sb.append("<duration>${n.duration}</duration>")
+                        if (n.tieStop) sb.append("<tie type=\"stop\"/>")
+                        if (n.tieStart) sb.append("<tie type=\"start\"/>")
+                        sb.append("<voice>${n.voice}</voice>")
+                        if (g.size > 1) sb.append("<staff>$staff</staff>")
+                        sb.append("</note>\n")
+                    }
+                    if (bi < blocks.size - 1) {
+                        val total = notes.filter { !it.chord }.sumOf { it.duration }
+                        if (total > 0) sb.append("      <backup><duration>$total</duration></backup>\n")
+                    }
                 }
                 sb.append("    </measure>\n")
             }

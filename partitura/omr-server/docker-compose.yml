@@ -1,0 +1,8 @@
+services:
+  omr:
+    build: .
+    restart: unless-stopped
+    environment:
+      - OMR_TOKEN=${OMR_TOKEN}
+    ports:
+      - "8080:8080"

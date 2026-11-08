@@ -32,16 +32,17 @@ object Spell {
     }
 }
 
+/** Nomes de notas em cifras (C D E F G A B), o jeito que o músico lê. */
 object Names {
-    private val PT = mapOf('C' to "Dó", 'D' to "Ré", 'E' to "Mi", 'F' to "Fá", 'G' to "Sol", 'A' to "Lá", 'B' to "Si")
-    fun step(step: Char, alter: Int) = PT.getValue(step) + when (alter) { 1 -> "♯"; -1 -> "♭"; 2 -> "𝄪"; -2 -> "♭♭"; else -> "" }
+    fun step(step: Char, alter: Int) = step.toString() + when (alter) { 1 -> "♯"; -1 -> "♭"; 2 -> "♯♯"; -2 -> "♭♭"; else -> "" }
     fun pitch(p: Pitch) = step(p.step, p.alter) + p.octave
     fun key(fifths: Int) = when (fifths) {
-        -7 -> "Dó♭"; -6 -> "Sol♭"; -5 -> "Ré♭"; -4 -> "Lá♭"; -3 -> "Mi♭"; -2 -> "Si♭"; -1 -> "Fá"; 0 -> "Dó"
-        1 -> "Sol"; 2 -> "Ré"; 3 -> "Lá"; 4 -> "Mi"; 5 -> "Si"; 6 -> "Fá♯"; 7 -> "Dó♯"; else -> "?"
+        -7 -> "C♭"; -6 -> "G♭"; -5 -> "D♭"; -4 -> "A♭"; -3 -> "E♭"; -2 -> "B♭"; -1 -> "F"; 0 -> "C"
+        1 -> "G"; 2 -> "D"; 3 -> "A"; 4 -> "E"; 5 -> "B"; 6 -> "F♯"; 7 -> "C♯"; else -> "?"
     }
+    /** Relativa menor (só a letra; o app escreve "menor" ao lado). */
     fun minorKey(fifths: Int) = when (fifths) {
-        -7 -> "Lá♭"; -6 -> "Mi♭"; -5 -> "Si♭"; -4 -> "Fá"; -3 -> "Dó"; -2 -> "Sol"; -1 -> "Ré"; 0 -> "Lá"
-        1 -> "Mi"; 2 -> "Si"; 3 -> "Fá♯"; 4 -> "Dó♯"; 5 -> "Sol♯"; 6 -> "Ré♯"; 7 -> "Lá♯"; else -> "?"
+        -7 -> "A♭"; -6 -> "E♭"; -5 -> "B♭"; -4 -> "F"; -3 -> "C"; -2 -> "G"; -1 -> "D"; 0 -> "A"
+        1 -> "E"; 2 -> "B"; 3 -> "F♯"; 4 -> "C♯"; 5 -> "G♯"; 6 -> "D♯"; 7 -> "A♯"; else -> "?"
     }
 }

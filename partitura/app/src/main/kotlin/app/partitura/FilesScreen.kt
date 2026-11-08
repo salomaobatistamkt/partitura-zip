@@ -30,7 +30,7 @@ fun FilesScreen(state: AppState) {
             Panel {
                 Text("Abrir", style = MaterialTheme.typography.titleSmall)
                 Button(onClick = { state.openPicker() }) { Text("Escolher arquivo") }
-                Text("MusicXML (.musicxml, .xml, .mxl). PDF e foto passam pelo servidor de leitura, que se configura nos Ajustes do Início.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("MusicXML (.musicxml, .xml, .mxl). PDF e foto passam pelo servidor de leitura (tela Servidor).", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             val saved = state.projects()
             Panel {

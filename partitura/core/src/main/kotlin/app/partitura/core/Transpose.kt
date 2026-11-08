@@ -23,7 +23,7 @@ object Transpose {
         val newFifths = (score.fifths + 7 * semitones).let { var f = it; while (f > 6) f -= 12; while (f < -6) f += 12; f }
         val out = score.copy(fifths = newFifths, parts = mutableListOf())
         for (p in score.parts) {
-            val np = Part(p.id, p.name, mutableListOf(), p.clef, p.group)
+            val np = Part(p.id, p.name, mutableListOf(), p.clef, p.group, p.inst)
             for (m in p.measures) np.measures += Measure(m.number, m.notes.map { n ->
                 val pt = n.pitch ?: return@map n
                 // desloca na linha das quintas pelo equivalente a semitons (7 quintas por semitom, mod 12)

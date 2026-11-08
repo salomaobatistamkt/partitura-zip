@@ -127,6 +127,96 @@ object Edit {
         for (part in s.parts) part.measures.forEachIndexed { i, mm -> part.measures[i] = Measure(i + 1, mm.notes) }
     }
 
+    /** Duração (em divisões) de cada compasso, tomada da primeira parte (cobre compasso anacrusico). */
+    private fun measureLengths(s: Score): List<Int> {
+        val first = s.parts.firstOrNull() ?: return emptyList()
+        val full = s.divisions * 4 * s.beats / s.beatType
+        return first.measures.map { m ->
+            val byVoice = m.notes.filter { !it.chord }.groupBy { it.voice }.values.map { l -> l.sumOf { it.duration } }
+            (byVoice.maxOrNull() ?: full).coerceAtLeast(1)
+        }
+    }
+
+    private fun freshId(s: Score): String {
+        var k = s.parts.size + 1
+        while (s.parts.any { it.id == "P$k" || it.id.startsWith("P$k-") }) k++
+        return "P$k"
+    }
+
+    /** Acrescenta um instrumento (piano = 2 pautas) com pausas em todos os compassos. Devolve o índice da primeira pauta nova. */
+    fun addInstrument(s: Score, inst: Instrument, lengths: List<Int>? = null): Int {
+        val lens = lengths ?: measureLengths(s)
+        val firstIdx = s.parts.size
+        val id = freshId(s)
+        val same = s.parts.map { it.group }.distinct().count { g -> s.parts.first { it.group == g }.name.substringBefore(" (pauta").trim().startsWith(inst.name) }
+        val baseName = if (same > 0) "${inst.name} ${same + 1}" else inst.name
+        val clefs = if (inst.staves == 2) listOf('G', 'F') else listOf(inst.clef)
+        clefs.forEachIndexed { k, clef ->
+            val pid = if (k == 0) id else "$id-${k + 1}"
+            val name = if (clefs.size > 1) "$baseName (pauta ${k + 1})" else baseName
+            s.parts += Part(pid, name, MutableList(lens.size) { Measure(it + 1, mutableListOf(Note(null, lens[it]))) }, clef, id, inst.timbre.id)
+        }
+        return firstIdx
+    }
+
+    /** Remove o instrumento da parte [p] (todas as pautas dele). Falso se for o único. */
+    fun removeInstrument(s: Score, p: Int): Boolean {
+        val g = s.parts.getOrNull(p)?.group ?: return false
+        if (s.parts.all { it.group == g }) return false
+        s.parts.removeAll { it.group == g }
+        return true
+    }
+
+    /** Troca o som (timbre do catálogo) do instrumento da parte [p]. */
+    fun setSound(s: Score, p: Int, inst: String) {
+        val g = s.parts.getOrNull(p)?.group ?: return
+        for (part in s.parts) if (part.group == g) part.inst = inst
+    }
+
+    fun addMeasures(s: Score, n: Int) { repeat(n.coerceIn(0, 400)) { addMeasure(s) } }
+
+    /**
+     * Escreve uma nota (ou pausa se [midi] == null) de [q] semínimas na posição (m, n), como num editor de partitura:
+     * ocupa pausas vizinhas, divide o que sobra em pausas e, se passar do fim do compasso, liga a nota ao compasso seguinte
+     * (criando compassos novos no fim). Devolve a próxima posição (compasso, índice).
+     */
+    fun enter(s: Score, p: Int, m0: Int, n0: Int, midi: Int?, q: Double): Pair<Int, Int> {
+        var m = m0; var n = n0
+        var want = (q * s.divisions).roundToInt().coerceAtLeast(1)
+        val pitch = midi?.let { Spell.forMidi(it.coerceIn(24, 108), s.fifths) }
+        var firstPiece = true
+        var guard = 0
+        while (want > 0 && guard++ < 400) {
+            val part = s.parts.getOrNull(p) ?: return m to n
+            val list = part.measures.getOrNull(m)?.notes ?: return m to n
+            if (n !in list.indices) return m to n
+            val got = setDurationSmart(s, p, m, n, want.toDouble() / s.divisions)
+            val atEnd = n == list.size - 1
+            val carry = want - got > 0 && atEnd
+            list[n] = list[n].copy(pitch = pitch, chord = false, tieStart = carry && pitch != null, tieStop = !firstPiece && pitch != null)
+            want -= got
+            firstPiece = false
+            if (!carry) {
+                want = 0
+                return if (n + 1 < list.size) m to n + 1 else {
+                    if (m + 1 >= part.measures.size) addMeasure(s)
+                    m + 1 to 0
+                }
+            }
+            if (m + 1 >= part.measures.size) addMeasure(s)
+            m += 1; n = 0
+        }
+        return m to n
+    }
+
+    /** Partitura nova já com o instrumento escolhido (piano = 2 pautas). */
+    fun blankFor(title: String, fifths: Int, beats: Int, beatType: Int, measures: Int, inst: Instrument, tempo: Int = 100): Score {
+        val s = Score(title, 4, fifths, beats, beatType, tempo)
+        val len = 4 * 4 * beats / beatType
+        addInstrument(s, inst, List(measures.coerceAtLeast(1)) { len })
+        return s
+    }
+
     fun blank(title: String, fifths: Int, beats: Int, beatType: Int, measures: Int, tempo: Int = 100): Score {
         val s = Score(title, 4, fifths, beats, beatType, tempo)
         val len = 4 * 4 * beats / beatType

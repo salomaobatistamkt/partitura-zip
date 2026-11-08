@@ -34,18 +34,18 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 private val TONICS = listOf(
-    "Dó" to Pitch('C', 0, 4), "Dó♯" to Pitch('C', 1, 4), "Ré♭" to Pitch('D', -1, 4), "Ré" to Pitch('D', 0, 4), "Mi♭" to Pitch('E', -1, 4),
-    "Mi" to Pitch('E', 0, 4), "Fá" to Pitch('F', 0, 4), "Fá♯" to Pitch('F', 1, 4), "Sol♭" to Pitch('G', -1, 4), "Sol" to Pitch('G', 0, 4),
-    "Lá♭" to Pitch('A', -1, 4), "Lá" to Pitch('A', 0, 4), "Si♭" to Pitch('B', -1, 4), "Si" to Pitch('B', 0, 4),
+    "C" to Pitch('C', 0, 4), "C♯" to Pitch('C', 1, 4), "D♭" to Pitch('D', -1, 4), "D" to Pitch('D', 0, 4), "E♭" to Pitch('E', -1, 4),
+    "E" to Pitch('E', 0, 4), "F" to Pitch('F', 0, 4), "F♯" to Pitch('F', 1, 4), "G♭" to Pitch('G', -1, 4), "G" to Pitch('G', 0, 4),
+    "A♭" to Pitch('A', -1, 4), "A" to Pitch('A', 0, 4), "B♭" to Pitch('B', -1, 4), "B" to Pitch('B', 0, 4),
 )
 
-/** Posição i (0 = Dó, 1 = Sol, 2 = Ré...) -> armadura em quintas (−5..6). */
+/** Posição i (0 = C, 1 = G, 2 = D...) -> armadura em quintas (−5..6). */
 private fun fifthsAt(i: Int) = if (i <= 6) i else i - 12
 private fun posOf(fifths: Int) = Math.floorMod(fifths, 12)
 
 private fun accidentalsText(f: Int): String {
-    val sharps = listOf("Fá♯", "Dó♯", "Sol♯", "Ré♯", "Lá♯", "Mi♯", "Si♯")
-    val flats = listOf("Si♭", "Mi♭", "Lá♭", "Ré♭", "Sol♭", "Dó♭", "Fá♭")
+    val sharps = listOf("F♯", "C♯", "G♯", "D♯", "A♯", "E♯", "B♯")
+    val flats = listOf("B♭", "E♭", "A♭", "D♭", "G♭", "C♭", "F♭")
     return when {
         f == 0 -> "sem sustenidos nem bemóis"
         f > 0 -> "$f sustenido${if (f > 1) "s" else ""}: " + sharps.take(f).joinToString(", ")
@@ -69,7 +69,7 @@ fun CircleOfFifths(sel: Int, minor: Boolean, onSelect: (Int, Boolean) -> Unit, m
         target += diff
     }
     val rot by animateFloatAsState(target, tween(450), label = "rot")
-    val majorNames = (0 until 12).map { Names.key(fifthsAt(it)).let { n -> if (it == 6) "Fá♯" else n } }
+    val majorNames = (0 until 12).map { Names.key(fifthsAt(it)).let { n -> if (it == 6) "F♯" else n } }
     val minorNames = (0 until 12).map { Names.minorKey(fifthsAt(it)) }
     val surfaceVar = cs.surfaceVariant; val surface = cs.surface; val primary = cs.primary; val secondary = cs.secondary
     val onSurface = cs.onSurface; val outline = cs.outline; val primaryC = cs.primaryContainer; val secC = cs.secondaryContainer
@@ -268,7 +268,7 @@ fun TheoryScreen(state: AppState, wide: Boolean) {
         Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 8.dp, vertical = 6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ToolBtn(Ic.BACK, { kbFirst = (kbFirst - 12).coerceAtLeast(24) })
-                Text("Dó${kbFirst / 12 - 1} – Dó${kbLast / 12 - 1}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("C${kbFirst / 12 - 1} – C${kbLast / 12 - 1}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 ToolBtn(Ic.NEXT, { kbFirst = (kbFirst + 12).coerceAtMost(96 - 12 * octs) })
                 Spacer(Modifier.weight(1f))
                 Text("Teclas claras = notas do exemplo", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

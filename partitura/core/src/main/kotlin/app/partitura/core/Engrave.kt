@@ -209,6 +209,10 @@ object Engrave {
                 for (pos in Layout.keySigPositions(p.clef, s.fifths)) {
                     items += Glyph(if (s.fifths > 0) SHARP else FLAT, kx, top + (8 - pos) / 2f); kx += 1.15f
                 }
+                if (first && s.parts.size > 1 && groups.any { it[0] == pi }) {
+                    val nm = p.name.substringBefore(" (pauta").trim().let { if (it.length > 11) it.take(10) + "…" else it }
+                    items += Txt(nm, x0 + 0.5f, top - 0.9f, 1.3f)
+                }
                 if (first) {
                     val tx = x0 + clefW + keyW
                     fun digits(n: Int, cy: Float) {

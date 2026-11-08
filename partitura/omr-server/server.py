@@ -1,10 +1,15 @@
 """Servidor de leitura de partitura (OMR) para o app Partitura.
 
-POST /omr  (corpo = bytes de um PDF, PNG ou JPEG)  ->  200 + MusicXML
+GET  /health  ->  {"ok": true, "needs_token": ...}   (sem chave; o app usa para testar a conexão)
+GET  /check   ->  200 se a chave confere (header Authorization: Bearer SEGREDO), 401 se não
+POST /omr     (corpo = bytes de um PDF, PNG ou JPEG)  ->  200 + MusicXML
 Usa o homr (https://github.com/liebharc/homr, AGPL-3.0) para reconhecer as notas.
-Se OMR_TOKEN estiver definido, a URL precisa terminar com ?token=SEGREDO.
+Se OMR_TOKEN estiver definido, /omr e /check exigem a chave: header "Authorization: Bearer SEGREDO"
+(ou, por compatibilidade, ?token=SEGREDO na URL).
 """
 import glob
+import hmac
+import json
 import os
 import subprocess
 import tempfile
@@ -86,15 +91,29 @@ class Handler(BaseHTTPRequestHandler):
     def _auth(self):
         if not TOKEN:
             return True
+        h = self.headers.get("Authorization", "")
+        if h.startswith("Bearer ") and hmac.compare_digest(h[7:].strip(), TOKEN):
+            return True
         q = parse_qs(urlparse(self.path).query)
-        return q.get("token", [""])[0] == TOKEN
+        return hmac.compare_digest(q.get("token", [""])[0], TOKEN)
 
     def do_GET(self):
-        self._send(200, "Servidor OMR do Partitura no ar. Envie um POST em /omr com o PDF ou a foto.")
+        path = urlparse(self.path).path.rstrip("/")
+        if path == "/health":
+            try:
+                from importlib.metadata import version
+                homr = version("homr")
+            except Exception:  # noqa: BLE001
+                homr = "?"
+            body = json.dumps({"ok": True, "needs_token": bool(TOKEN), "homr": homr, "busy": LOCK.locked()})
+            return self._send(200, body, "application/json")
+        if path == "/check":
+            return self._send(200, "ok") if self._auth() else self._send(401, "chave inválida")
+        self._send(200, "Servidor de leitura de partitura no ar. Use POST /omr com o PDF ou a foto, ou GET /health para testar.")
 
     def do_POST(self):
         if not self._auth():
-            return self._send(401, "token inválido")
+            return self._send(401, "chave inválida")
         n = int(self.headers.get("Content-Length", "0"))
         if n <= 0 or n > MAX_BYTES:
             return self._send(413, "arquivo vazio ou maior que 40 MB")

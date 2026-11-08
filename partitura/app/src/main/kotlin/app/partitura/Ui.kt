@@ -36,7 +36,7 @@ object Fonts {
     fun init(assets: AssetManager) { try { bravura = Typeface.createFromAsset(assets, "bravura.otf") } catch (_: Exception) {} }
 }
 
-enum class Ic { HOME, STUDIO, SWAP, THEORY, FOLDER, PLAY, PAUSE, STOP, LOOP, MIXER, EDIT, UNDO, REDO, PLUS, MINUS, GEAR, PIANO, ZOOM_IN, ZOOM_OUT, START, TRASH, SAVE, OPEN, CAMERA, BACK, NEXT }
+enum class Ic { HOME, STUDIO, SWAP, THEORY, FOLDER, PLAY, PAUSE, STOP, LOOP, MIXER, EDIT, UNDO, REDO, PLUS, MINUS, GEAR, PIANO, ZOOM_IN, ZOOM_OUT, START, TRASH, SAVE, OPEN, CAMERA, BACK, NEXT, CONDUCT, SERVER, INSTR, MORE, COPY, CHECK }
 
 @Composable
 fun Icon24(kind: Ic, tint: Color, dp: Dp = 24.dp, modifier: Modifier = Modifier) {
@@ -71,6 +71,12 @@ fun Icon24(kind: Ic, tint: Color, dp: Dp = 24.dp, modifier: Modifier = Modifier)
             Ic.OPEN -> { path({ moveTo(12f * u, 4f * u); lineTo(12f * u, 15f * u); moveTo(7.5f * u, 10.5f * u); lineTo(12f * u, 15f * u); lineTo(16.5f * u, 10.5f * u) }); line(5f, 20f, 19f, 20f) }
             Ic.CAMERA -> { path({ moveTo(3f * u, 8f * u); lineTo(7.5f * u, 8f * u); lineTo(9f * u, 5.5f * u); lineTo(15f * u, 5.5f * u); lineTo(16.5f * u, 8f * u); lineTo(21f * u, 8f * u); lineTo(21f * u, 19f * u); lineTo(3f * u, 19f * u); close() }); drawCircle(tint, 3.6f * u, Offset(12f * u, 13.2f * u), style = st) }
             Ic.BACK -> { line(15f, 5f, 8f, 12f); line(8f, 12f, 15f, 19f) }
+            Ic.CONDUCT -> { path({ moveTo(12f * u, 3.5f * u); lineTo(12f * u, 17f * u); quadTo(11f * u, 20.5f * u, 7.5f * u, 17f * u); moveTo(12f * u, 17f * u); quadTo(18f * u, 18f * u, 19f * u, 10f * u) }); drawCircle(tint, 1.7f * u, Offset(19f * u, 9f * u)) }
+            Ic.SERVER -> { drawRect(tint, Offset(4f * u, 4f * u), Size(16f * u, 6.5f * u), style = st); drawRect(tint, Offset(4f * u, 13.5f * u), Size(16f * u, 6.5f * u), style = st); drawCircle(tint, 1.1f * u, Offset(8f * u, 7.2f * u)); drawCircle(tint, 1.1f * u, Offset(8f * u, 16.8f * u)) }
+            Ic.INSTR -> { line(3f, 6f, 21f, 6f); line(3f, 12f, 21f, 12f); line(3f, 18f, 21f, 18f); drawCircle(tint, 2.6f * u, Offset(15f * u, 9f * u)); line(17.4f, 9f, 17.4f, 2.5f) }
+            Ic.MORE -> { drawCircle(tint, 1.9f * u, Offset(5f * u, 12f * u)); drawCircle(tint, 1.9f * u, Offset(12f * u, 12f * u)); drawCircle(tint, 1.9f * u, Offset(19f * u, 12f * u)) }
+            Ic.COPY -> { drawRect(tint, Offset(8f * u, 8f * u), Size(11f * u, 12f * u), style = st); path({ moveTo(5f * u, 15f * u); lineTo(5f * u, 4f * u); lineTo(14f * u, 4f * u) }) }
+            Ic.CHECK -> path({ moveTo(5f * u, 12.5f * u); lineTo(10f * u, 17.5f * u); lineTo(19f * u, 7f * u) })
             Ic.NEXT -> { line(9f, 5f, 16f, 12f); line(16f, 12f, 9f, 19f) }
         }
     }

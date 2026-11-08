@@ -10,7 +10,11 @@ import androidx.compose.ui.unit.dp
 val Paper = Color(0xFFFBF8F0)
 val Ink = Color(0xFF1E1E24)
 val Amber = Color(0xFFE07A00)
+val Amber2 = Color(0xFFE9B35A)
 val Blue = Color(0xFF2F6FDE)
+val Violet = Color(0xFFA08CF7)
+val Mint = Color(0xFF4DBB91)
+val Sky = Color(0xFF6FB1F2)
 
 private val Dark = darkColorScheme(
     primary = Color(0xFFE9B35A), onPrimary = Color(0xFF1B1405),

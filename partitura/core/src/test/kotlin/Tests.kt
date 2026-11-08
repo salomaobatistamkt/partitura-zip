@@ -42,10 +42,10 @@ fun main() {
     check("Acorde Sol menor com sétima", pn(Theory.chord(Pitch('G', 0, 3), ChordQuality.MENOR_SETIMA)) == "G3 Bb3 D4 F4")
     check("Acorde Mib maior", pn(Theory.chord(Pitch('E', -1, 3), ChordQuality.MAIOR)) == "Eb3 G3 Bb3")
     val field = Theory.harmonicField(Pitch('E', -1, 3), true)
-    check("Campo harmônico de Mib: " + field.joinToString(" ") { it.name }, field.joinToString(" ") { it.name } == "Mi♭ Fám Solm Lá♭ Si♭ Dóm Ré°")
+    check("Campo harmônico de Mib: " + field.joinToString(" ") { it.name }, field.joinToString(" ") { it.name } == "E♭ Fm Gm A♭ B♭ Cm D°")
     check("Campo: Mib maior tríade", pn(field[0].notes) == "Eb3 G3 Bb3" && pn(field[6].notes) == "D4 F4 Ab4")
     val fm = Theory.harmonicField(Pitch('G', 0, 3), false).joinToString(" ") { it.name }
-    check("Campo de Sol menor: $fm", fm == "Solm Lá° Si♭ Dóm Rém Mi♭ Fá")
+    check("Campo de Sol menor: $fm", fm == "Gm A° B♭ Cm Dm E♭ F")
     check("Spell Mib maior: 63 é Eb e 66 é Gb ou F#", Spell.forMidi(63, -3).toString() == "Eb4" && Spell.forMidi(66, -3).toString() == "Gb4" && Spell.forMidi(66, 2).toString() == "F#4")
     for (sc in Samples.all()) check("Exemplo '${sc.title}' válido", Validate.measureDurations(sc).isEmpty() && sc.parts.all { it.measures.isNotEmpty() })
     val ode = Samples.ode()
@@ -151,6 +151,172 @@ fun main() {
     }
     val emp = Edit.blank("e", 0, 4, 4, 1); Edit.delete(emp, 0, 0, 0)
     check("Apagar a última nota deixa pausa de compasso (nunca compasso vazio)", emp.parts[0].measures[0].notes.size == 1 && Validate.measureDurations(emp).isEmpty())
+
+    // ---------- instrumentos ----------
+    run {
+        val sc = Edit.blank("inst", 0, 4, 4, 6)
+        val gi = Edit.addInstrument(sc, Instruments.byId("guitar")!!)
+        check("Adicionar violão: 2 partes, clave G, timbre guitar, mesmos compassos", sc.parts.size == 2 && gi == 1 && sc.parts[1].name == "Violão" && sc.parts[1].inst == "guitar" && sc.parts[1].clef == 'G' && sc.parts[1].measures.size == 6)
+        val pi = Edit.addInstrument(sc, Instruments.byId("piano")!!)
+        check("Adicionar piano: 2 pautas G e F no mesmo grupo", sc.parts.size == 4 && pi == 2 && sc.parts[2].group == sc.parts[3].group && sc.parts[2].clef == 'G' && sc.parts[3].clef == 'F' && sc.parts[2].group != sc.parts[0].group)
+        Edit.addInstrument(sc, Instruments.byId("violin")!!); Edit.addInstrument(sc, Instruments.byId("violin")!!)
+        check("Dois violinos recebem nomes diferentes", sc.parts.filter { it.name.startsWith("Violino") }.map { it.name } == listOf("Violino", "Violino 2"))
+        check("Ids de partes únicos", sc.parts.map { it.id }.distinct().size == sc.parts.size)
+        check("Compassos novos têm duração certa", Validate.measureDurations(sc).isEmpty())
+        val ids = sc.parts.map { it.id }
+        val scene = Engrave.scene(sc, 120f)
+        check("Cena com 6 pautas sem NaN e com chave do piano", scene.items.none { it is Glyph && (it.x.isNaN() || it.y.isNaN()) } && scene.items.any { it is Brace } && scene.systems.all { it.staffTops.size == 6 })
+        val back = MusicXml.parseAny(MusicXml.write(sc).toByteArray())
+        check("MusicXML guarda instrumentos: mesmo número de pautas", back.parts.size == sc.parts.size)
+        check("MusicXML guarda timbres", back.parts.map { it.inst } == sc.parts.map { it.inst })
+        check("MusicXML guarda o grupo do piano (chave)", back.parts[2].group == back.parts[3].group && back.parts[0].group != back.parts[1].group && back.parts[2].clef == 'G' && back.parts[3].clef == 'F')
+        check("Nome do piano volta sem duplicar", back.parts[2].name == "Piano 2 (pauta 1)" && back.parts[3].name == "Piano 2 (pauta 2)")
+        check("Remover o violão tira só ele", Edit.removeInstrument(sc, 1) && sc.parts.size == 5 && sc.parts.none { it.name == "Violão" })
+        check("Remover o piano tira as 2 pautas", Edit.removeInstrument(sc, 1) && sc.parts.size == 3)
+        val only = Edit.blank("x", 0, 4, 4, 2)
+        check("Não deixa remover o único instrumento", !Edit.removeInstrument(only, 0) && only.parts.size == 1)
+        Edit.setSound(sc, 0, "organ"); check("Trocar o som muda o timbre", sc.parts[0].inst == "organ")
+        // MusicXML de outro programa: programa MIDI 25 (violão de nylon) vira timbre guitar
+        val x = MusicXml.write(Edit.blank("g", 0, 4, 4, 1)).replace("<midi-program>1</midi-program>", "<midi-program>25</midi-program>")
+        check("Programa MIDI 25 -> violão", MusicXml.parse(x.toByteArray()).parts[0].inst == "guitar")
+        val x2 = MusicXml.write(Edit.blank("g", 0, 4, 4, 1)).replace("<part-name>Piano</part-name>", "<part-name>Violino I</part-name>").replace("<midi-program>1</midi-program>", "")
+        check("Sem programa MIDI: palpite pelo nome (Violino -> cordas)", MusicXml.parse(x2.toByteArray()).parts[0].inst == "strings")
+        val mid = Midi.export(Edit.blank("m", 0, 4, 4, 1).also { Edit.setSound(it, 0, "guitar") })
+        var hasPc = false; for (i in 0 until mid.size - 1) if ((mid[i].toInt() and 255) == 0xC0 && (mid[i + 1].toInt() and 255) == 24) hasPc = true
+        check("MIDI exporta o programa do violão (24)", hasPc)
+    }
+    // ---------- timbres ----------
+    run {
+        fun one(id: String, midi: Int): ShortArray {
+            val sc = Theory.toScore("t", listOf(Spell.forMidi(midi, 0)), 2.0, 0)
+            sc.parts[0].inst = id
+            return Synth.render(sc, 60)
+        }
+        fun rms(a: ShortArray, from: Int, to: Int): Double { var t = 0.0; for (i in from until minOf(to, a.size)) t += a[i].toDouble() * a[i]; return Math.sqrt(t / maxOf(1, minOf(to, a.size) - from)) }
+        val ref = rms(one("piano", 60), 0, 22050)
+        var allOk = true; val rep = StringBuilder()
+        for (t in Timbre.ALL) {
+            for (midi in listOf(40, 60, 72, 84)) {
+                val a = one(t.id, midi)
+                val r = rms(a, 2000, 24000)
+                val ratio = r / ref
+                val peak = a.maxOf { Math.abs(it.toInt()) }
+                if (a.any { false } || peak < 1500 || peak > 32000 || ratio < 0.3 || ratio > 3.2) { allOk = false; rep.append(" ${t.id}@$midi ratio=${"%.2f".format(ratio)} peak=$peak") }
+            }
+        }
+        check("Todos os timbres: volume parecido com o do piano e sem estourar:$rep", allOk)
+        // frequência
+        var fOk = true
+        for (t in Timbre.ALL) {
+            val a = one(t.id, 69); var zc = 0
+            for (i in 8000 until 8000 + 22050) if (a[i - 1] < 0 && a[i] >= 0) zc++
+            // 440 Hz => ~440 cruzamentos em 1 s; harmônicos fortes podem somar cruzamentos, então exige 1× a 3×
+            println("   zc ${t.id}=$zc")
+            if (zc < 200 || zc > 700) fOk = false
+        }
+        check("Todos os timbres soam na altura certa (A4)", fOk)
+        val org = one("organ", 60); val pia = one("piano", 60)
+        val orgDecay = rms(org, 33000, 36000) / rms(org, 3000, 6000)
+        val piaDecay = rms(pia, 33000, 36000) / rms(pia, 3000, 6000)
+        check("Órgão sustenta (${"%.2f".format(orgDecay)}) e piano decai (${"%.2f".format(piaDecay)})", orgDecay > 0.8 && piaDecay < 0.6)
+        val gtr = one("guitar", 52); val gdec = rms(gtr, 33000, 36000) / rms(gtr, 3000, 6000)
+        check("Violão decai mais rápido que órgão (${"%.2f".format(gdec)})", gdec < 0.5)
+        // vozes diferentes no mesmo score
+        val sc = Edit.blank("mix", 0, 4, 4, 2); Edit.addInstrument(sc, Instruments.byId("flute")!!)
+        Edit.enter(sc, 0, 0, 0, 60, 4.0); Edit.enter(sc, 1, 0, 0, 72, 4.0)
+        val t0 = System.nanoTime(); val pcm = Synth.render(sc, 120); val ms = (System.nanoTime() - t0) / 1_000_000
+        check("Mistura piano + flauta renderiza (${ms} ms, ${pcm.size} amostras)", pcm.size > 44100 && pcm.any { it.toInt() != 0 })
+        val cl = Synth.clickLoop(4, 0.5)
+        check("Metrônomo: 4 batidas de 0,5 s = 2 s, acento na primeira", cl.size == 4 * 22050 && cl.take(400).maxOf { Math.abs(it.toInt()) } > cl.drop(22050).take(400).maxOf { Math.abs(it.toInt()) })
+    }
+    // ---------- escrever música inteira ----------
+    run {
+        val sc = Edit.blank("longa", 0, 4, 4, 2)
+        var pos = 0 to 0
+        repeat(40) { pos = Edit.enter(sc, 0, pos.first, pos.second, 60 + it % 7, 1.0) }
+        check("40 semínimas em 4/4 ocupam 10 compassos (cresceu sozinho: ${sc.parts[0].measures.size})", sc.parts[0].measures.size == 11 && pos.first == 10)
+        check("Todos os compassos completos", Validate.measureDurations(sc).isEmpty())
+        // compasso 11 só tem a pausa
+        check("Sobra um compasso novo vazio no fim", sc.parts[0].measures.last().notes.size == 1 && sc.parts[0].measures.last().notes[0].pitch == null)
+        // misturar durações: mínima, 2 colcheias, semínima, depois nota longa cruzando compasso
+        val s2 = Edit.blank("misto", 0, 4, 4, 2)
+        var p2 = 0 to 0
+        p2 = Edit.enter(s2, 0, p2.first, p2.second, 64, 2.0)
+        p2 = Edit.enter(s2, 0, p2.first, p2.second, 65, 0.5)
+        p2 = Edit.enter(s2, 0, p2.first, p2.second, 67, 0.5)
+        p2 = Edit.enter(s2, 0, p2.first, p2.second, 69, 1.0)
+        check("Compasso 1 fechou e o cursor foi para o compasso 2 (${p2})", p2.first == 1 && p2.second == 0 && Validate.measureDurations(s2).isEmpty())
+        p2 = Edit.enter(s2, 0, 1, 0, 60, 3.0)
+        p2 = Edit.enter(s2, 0, p2.first, p2.second, 62, 2.0)  // 1 tempo cabe no compasso 2, o resto liga ao 3
+        check("Nota que passa do compasso é dividida e ligada", s2.parts[0].measures[1].notes.last().let { it.pitch != null && it.tieStart } && s2.parts[0].measures[2].notes.first().let { it.tieStop && it.pitch?.midi == 62 })
+        check("Compassos continuam completos depois da ligadura (${Validate.measureDurations(s2)})", Validate.measureDurations(s2).isEmpty())
+        val ev = Synth.events(s2, 60).filter { it.midi == 62 }
+        check("Som da nota ligada dura 2 tempos (${ev.map { it.durSec }})", ev.size == 1 && Math.abs(ev[0].durSec - 2.0) < 1e-6)
+        // pausa entrada
+        val s3 = Edit.blank("pausas", 0, 4, 4, 1)
+        val p3 = Edit.enter(s3, 0, 0, 0, null, 1.0)
+        check("Entrar pausa de 1 tempo mantém compasso completo", Validate.measureDurations(s3).isEmpty() && p3 == (0 to 1) && s3.parts[0].measures[0].notes[0].pitch == null)
+        // duas partes: cursor segue só na parte escolhida; outra parte cresce junto
+        val s4 = Edit.blank("duas", 0, 4, 4, 1); Edit.addInstrument(s4, Instruments.byId("guitar")!!)
+        var q4 = 0 to 0
+        repeat(8) { q4 = Edit.enter(s4, 0, q4.first, q4.second, 60, 1.0) }
+        check("Partes continuam com o mesmo número de compassos (${s4.parts.map { it.measures.size }})", s4.parts.map { it.measures.size }.distinct().size == 1 && Validate.measureDurations(s4).isEmpty())
+        // 3/4 e 6/8
+        val s5 = Edit.blank("valsa", 0, 3, 4, 1); var q5 = 0 to 0
+        repeat(9) { q5 = Edit.enter(s5, 0, q5.first, q5.second, 62, 1.0) }
+        check("3/4: 9 semínimas = 3 compassos cheios", s5.parts[0].measures.size == 4 && Validate.measureDurations(s5).isEmpty())
+        val s6 = Edit.blank("seis", 0, 6, 8, 1); var q6 = 0 to 0
+        repeat(12) { q6 = Edit.enter(s6, 0, q6.first, q6.second, 62, 0.5) }
+        check("6/8: 12 colcheias = 2 compassos cheios", s6.parts[0].measures.size == 3 && Validate.measureDurations(s6).isEmpty())
+        // desempenho: música de 200 compassos com 3 instrumentos
+        val big = Edit.blank("grande", 0, 4, 4, 200)
+        Edit.addInstrument(big, Instruments.byId("guitar")!!); Edit.addInstrument(big, Instruments.byId("piano")!!)
+        for (pi in big.parts.indices) for (m in big.parts[pi].measures) { m.notes.clear(); repeat(8) { m.notes += Note(Pitch('C', 0, 4 + (it % 2)), 2) } }
+        val t0 = System.nanoTime(); val sce = Engrave.scene(big, 140f); val ms = (System.nanoTime() - t0) / 1_000_000
+        val t1 = System.nanoTime(); Synth.render(big, 120); val ms2 = (System.nanoTime() - t1) / 1_000_000
+        println("   (200 compassos x 4 pautas: desenho ${ms} ms, síntese ${ms2} ms, ${sce.systems.size} sistemas)")
+        check("200 compassos: desenho abaixo de 3 s", ms < 3000)
+        val t2 = System.nanoTime(); val prep = Synth.prepare(big, 120); val c0 = prep.next()!!; val first = (System.nanoTime() - t2) / 1_000_000
+        println("   (primeiro pedaço de áudio de 200 compassos: ${first} ms; total ${prep.total / 44100} s de áudio)")
+        check("Som começa quase na hora: 1º pedaço (1 s) em menos de 400 ms mesmo com 200 compassos (${first} ms)", c0.size == 44100 && first < 400)
+        var n = c0.size; var chunks = 1; while (true) { val c = prep.next() ?: break; n += c.size; chunks++ }
+        check("Pedaços somam o total ($n de ${prep.total}, $chunks pedaços)", n == prep.total)
+        val sm = Edit.blank("curta", 0, 4, 4, 3); Edit.enter(sm, 0, 0, 0, 60, 1.0)
+        val full = Synth.render(sm, 120); val pp = Synth.prepare(sm, 120); var joined = ShortArray(0); while (true) { val c = pp.next() ?: break; joined += c }
+        check("Streaming e render inteiro dão o mesmo áudio", joined.contentEquals(full))
+    }
+
+    // ---------- regência ----------
+    run {
+        var ok = true; val rep = StringBuilder()
+        for ((b, bt) in Conducting.METERS + listOf(7 to 4, 7 to 8, 9 to 4, 5 to 8, 1 to 4)) {
+            val pat = Conducting.forMeter(b, bt)
+            val pts = pat.path(60)
+            if (pts.any { it.x.isNaN() || it.x < -0.05f || it.x > 1.05f || it.y < -0.05f || it.y > 1.05f }) { ok = false; rep.append(" $b/$bt fora do quadro") }
+            if (pat.steps.size != pat.beats || pat.ictus.size != pat.beats) { ok = false; rep.append(" $b/$bt instruções=${pat.steps.size}") }
+            for (i in 0 until pat.beats) {
+                val p = pat.position(i.toDouble()); val q = pat.ictusPoint(i)
+                if (Math.abs(p.x - q.x) > 1e-3f || Math.abs(p.y - q.y) > 1e-3f) { ok = false; rep.append(" $b/$bt ictus $i não coincide") }
+            }
+            // contínuo: nenhum salto grande entre amostras vizinhas
+            var maxJump = 0f
+            for (k in 1 until pts.size) maxJump = maxOf(maxJump, Math.hypot((pts[k].x - pts[k - 1].x).toDouble(), (pts[k].y - pts[k - 1].y).toDouble()).toFloat())
+            val wrap = pat.position(pat.beats.toDouble()); val st = pat.position(0.0)
+            if (maxJump > 0.12f || Math.abs(wrap.x - st.x) > 1e-3f) { ok = false; rep.append(" $b/$bt salto ${"%.2f".format(maxJump)}") }
+        }
+        check("Regência: todos os padrões ficam no quadro, passam pelos ictus e fecham o ciclo$rep", ok)
+        val p44 = Conducting.forMeter(4, 4); val p68 = Conducting.forMeter(6, 8); val p34 = Conducting.forMeter(3, 4); val p38 = Conducting.forMeter(3, 8)
+        check("4/4 = 4 gestos de 1 semínima; 6/8 = 2 gestos de 1,5; 3/4 = 3; 3/8 = 1 gesto", p44.beats == 4 && p44.beatQuarters == 1.0 && p68.beats == 2 && p68.beatQuarters == 1.5 && p68.sub == 3 && p34.beats == 3 && p38.beats == 1)
+        check("Compasso mede o mesmo em semínimas que a pauta (6/8 = 3)", p68.measureQuarters == 3.0 && p44.measureQuarters == 4.0)
+        check("O primeiro gesto desce (ictus 1 é o ponto mais baixo no 4/4)", (1 until 4).all { p44.ictusPoint(0).y > p44.ictusPoint(it).y })
+    }
+    run {
+        val n1 = Edit.blankFor("n", -2, 3, 4, 16, Instruments.byId("piano")!!, 90)
+        check("Nova partitura de piano: 2 pautas G+F, 16 compassos, sem 'Piano 2'", n1.parts.size == 2 && n1.parts[0].name == "Piano (pauta 1)" && n1.parts[1].clef == 'F' && n1.parts[0].measures.size == 16 && n1.tempo == 90 && Validate.measureDurations(n1).isEmpty())
+        val n2 = Edit.blankFor("n", 0, 6, 8, 8, Instruments.byId("guitar")!!)
+        check("Nova partitura de violão em 6/8 com compassos de 3 semínimas", n2.parts.size == 1 && n2.parts[0].inst == "guitar" && n2.parts[0].measures[0].notes[0].duration == 12 && Validate.measureDurations(n2).isEmpty())
+    }
+    check("Nomes em cifra", Names.key(-3) == "E♭" && Names.key(0) == "C" && Names.minorKey(0) == "A" && Names.step('F', 1) == "F♯" && Names.pitch(Pitch('B', -1, 3)) == "B♭3")
     println(if (fails == 0) "TODOS OS TESTES PASSARAM" else "$fails FALHAS")
     kotlin.system.exitProcess(if (fails == 0) 0 else 1)
 }

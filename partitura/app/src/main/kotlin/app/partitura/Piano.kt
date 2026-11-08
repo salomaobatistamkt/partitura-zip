@@ -46,7 +46,7 @@ fun PianoKeyboard(first: Int, last: Int, active: Set<Int>, marks: Set<Int>, onKe
         whites.forEachIndexed { i, m ->
             val color = when { m in active -> Color(0xFFE07A00); m in marks -> Color(0xFFFBE3B0); else -> Color(0xFFF7F4EC) }
             drawRect(color, Offset(i * kw + 0.5f, 0f), Size(kw - 1f, size.height))
-            if (m % 12 == 0) drawIntoCanvas { it.nativeCanvas.drawText("Dó${m / 12 - 1}", i * kw + kw / 2, size.height - 6f, labelPaint) }
+            if (m % 12 == 0) drawIntoCanvas { it.nativeCanvas.drawText("C${m / 12 - 1}", i * kw + kw / 2, size.height - 6f, labelPaint) }
         }
         val bw = kw * 0.62f
         for (m in first..last) {
