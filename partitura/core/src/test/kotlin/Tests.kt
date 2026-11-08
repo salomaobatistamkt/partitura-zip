@@ -641,6 +641,34 @@ fun main() {
         val ev3 = ArrayList<Int>(); for (e in Synth.events(coro, 100)) for (t in mix.tracksFor(e.part, e.voice, e.mi)) if (mix.audible(t)) ev3 += e.midi
         check("Solo do baixo: toca só a 2ª voz da pauta de Fá (e a 1ª no compasso em uníssono)", ev3.sorted() == listOf(Pitch('C', 0, 3).midi, Pitch('B', 0, 2).midi, Pitch('C', 0, 3).midi).sorted())
     }
+    run {
+        // regente: nenhum ponto inválido em nenhum compasso, e o quadril desce no ictus (joelhos dobram)
+        var bad = 0
+        for ((b, t) in listOf(2 to 4, 3 to 4, 4 to 4, 6 to 8, 5 to 8, 7 to 8)) for (oi in Conducting.options(b, t).indices) {
+            val p = Conducting.forMeter(b, t, oi); var ph = -0.5
+            while (ph < p.beats * 2.0) { for (pr in ConductRig.pose(p, ph, ph > 1.0, ph)) if (listOf(pr.a.x, pr.a.y, pr.b.x, pr.b.y).any { it.isNaN() || it.isInfinite() }) bad++; ph += 0.11 }
+        }
+        check("Regente: corpo inteiro sem valores inválidos", bad == 0)
+    }
+    run {
+        // teclado: tons sintéticos (fundamental + harmônicos), uma tecla por vez → perfil → acorde reconhecido
+        val sr = 22050
+        fun tone(m: Int, d: Double): FloatArray { val f = 440.0 * Math.pow(2.0, (m - 69) / 12.0); return FloatArray((d * sr).toInt()) { i -> val t = i.toDouble() / sr; var v = 0.0; for (h in 1..6) v += Math.sin(2 * Math.PI * f * h * t) * Math.pow(0.6, h - 1.0); (v * Math.exp(-t * 1.2) * 0.2).toFloat() } }
+        val lo = 40; val hi = 64; val rec = ArrayList<Float>()
+        for (m in lo..hi) { for (v in tone(m, 1.0)) rec += v; repeat((0.5 * sr).toInt()) { rec += 0f } }
+        val r = KeyboardCalib.learn(rec.toFloatArray(), sr, lo, hi, "teste")
+        check("Calibração: aprende ${hi - lo + 1} teclas (${r.message})", r.profile != null)
+        val prof = r.profile
+        if (prof != null) {
+            val back = KeyboardProfile.fromBytes(prof.toBytes())
+            check("Calibração: perfil sobrevive a salvar/ler", back != null && back.lowMidi == lo && back.highMidi == hi && back.templates[3][5] == prof.templates[3][5])
+            val mix = FloatArray(3 * sr); for (m in listOf(43, 50, 59)) { val t = tone(m, 2.0); for (i in t.indices) mix[i + sr / 2] += t[i] }
+            val got = NmfTranscriber(prof).transcribe(mix, sr).map { it.midi }.toSet()
+            check("Calibração: acorde 43+50+59 reconhecido (${got.sorted()})", got.containsAll(listOf(43, 50, 59)) && got.size <= 5)
+        }
+        val few = KeyboardCalib.learn(rec.toFloatArray().copyOf(sr * 20), sr, lo, hi, "x")
+        check("Calibração: gravação incompleta é recusada com aviso honesto", few.profile == null && few.message.contains("Ouvi"))
+    }
     println(if (fails == 0) "TODOS OS TESTES PASSARAM" else "$fails FALHAS")
     kotlin.system.exitProcess(if (fails == 0) 0 else 1)
 }

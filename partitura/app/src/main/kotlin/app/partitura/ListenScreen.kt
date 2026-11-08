@@ -37,6 +37,17 @@ fun ListenScreen(state: AppState) {
     var result by remember { mutableStateOf<Transcribed?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
+    val profFile = remember { java.io.File(ctx.filesDir, "keyboard.profile") }
+    var profile by remember { mutableStateOf<KeyboardProfile?>(try { if (profFile.exists()) KeyboardProfile.fromBytes(profFile.readBytes()) else null } catch (_: Throwable) { null }) }
+    var useProfile by rememberSaveable { mutableStateOf(true) }
+    val calRec = remember { MicRecorder() }
+    var calPhase by remember { mutableIntStateOf(0) }          // 0 parado, 1 gravando, 2 aprendendo
+    var calPreset by rememberSaveable { mutableIntStateOf(1) }
+    var calSecs by remember { mutableDoubleStateOf(0.0) }
+    var calLevel by remember { mutableFloatStateOf(0f) }
+    var calMsg by remember { mutableStateOf<String?>(null) }
+    var calOk by remember { mutableStateOf(false) }
+
     var title by rememberSaveable { mutableStateOf("Gravação") }
     var mode by rememberSaveable { mutableIntStateOf(0) }
     var meter by rememberSaveable { mutableIntStateOf(0) }
@@ -62,7 +73,7 @@ fun ListenScreen(state: AppState) {
         Thread {
             try {
                 if (audio.size < sr / 2) throw IllegalStateException("O áudio ficou curto demais (menos de meio segundo).")
-                val h = Listener.hear(ctx, audio, sr) { p, t -> main.post { prog = p; progText = t } }
+                val h = Listener.hear(ctx, audio, sr, if (useProfile) profile else null) { p, t -> main.post { prog = p; progText = t } }
                 main.post { heard = h; build() }
             } catch (e: Throwable) {
                 main.post { error = e.message ?: e.toString(); phase = 3 }
@@ -72,6 +83,24 @@ fun ListenScreen(state: AppState) {
 
     fun startRec() {
         rec.start(); phase = 1; error = null
+    }
+
+    fun startCal() { calRec.start(); calPhase = 1; calMsg = null; calOk = false }
+    fun finishCal() {
+        val a = calRec.stop(); val sr = calRec.rate
+        val (name, lo, hi) = KeyboardProfile.PRESETS[calPreset]
+        calPhase = 2
+        Thread {
+            val r: KeyboardCalib.Result? = try { KeyboardCalib.learn(a, sr, lo, hi, name) } catch (e: Throwable) { null }
+            main.post {
+                if (r?.profile != null) {
+                    try { profFile.writeBytes(r.profile.toBytes()) } catch (_: Throwable) {}
+                    profile = r.profile; calOk = true; useProfile = true
+                }
+                calMsg = r?.message ?: "Não consegui analisar essa gravação."
+                calPhase = 0
+            }
+        }.start()
     }
 
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
@@ -97,7 +126,13 @@ fun ListenScreen(state: AppState) {
             kotlinx.coroutines.delay(60)
         }
     }
-    DisposableEffect(Unit) { onDispose { if (rec.isRunning) rec.stop() } }
+    LaunchedEffect(calPhase) {
+        while (calPhase == 1) { calLevel = calRec.level; calSecs = calRec.seconds; calRec.error?.let { calMsg = it; calPhase = 0 }; kotlinx.coroutines.delay(60) }
+    }
+    DisposableEffect(Unit) { onDispose { if (rec.isRunning) rec.stop(); if (calRec.isRunning) calRec.stop() } }
+    val calPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) startCal() else calMsg = "Sem permissão do microfone não consigo ouvir o teclado."
+    }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Ouvir", style = MaterialTheme.typography.headlineSmall)
@@ -129,6 +164,41 @@ fun ListenScreen(state: AppState) {
                 }
             }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        }
+
+        Panel {
+            Text("Calibrar o meu teclado", style = MaterialTheme.typography.titleMedium)
+            val pr = profile
+            Text(if (pr != null) "Teclado aprendido: ${pr.label.ifBlank { "${pr.keys} teclas" }} (${KeyboardProfile.noteName(pr.lowMidi)} a ${KeyboardProfile.noteName(pr.highMidi)})." else "Ainda não calibrado. A calibração ensina ao app o som de cada tecla do seu instrumento; depois, ao gravar, ele procura essas notas em vez de adivinhar.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (calPhase == 0) {
+                SectionTitle("Quantas teclas?")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    KeyboardProfile.PRESETS.forEachIndexed { i, (n, _, _) -> FilterChip(selected = calPreset == i, onClick = { calPreset = i }, label = { Text(n) }) }
+                }
+                Text("Notas escritas no padrão científico (Dó central = C4). Se o seu teclado mostra o Dó central como C3, o C1 dele é o C2 aqui; o que importa é tocar da primeira à última tecla.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Como fazer: aperte Gravar e toque cada tecla uma vez, em ordem, da mais grave à mais aguda, de semitom em semitom (brancas e pretas, sem pular). Segure cerca de 1 segundo e solte antes da próxima, sem pedal, em lugar silencioso, com o app perto do teclado.", style = MaterialTheme.typography.bodySmall)
+                Button(onClick = {
+                    if (ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startCal()
+                    else calPermission.launch(Manifest.permission.RECORD_AUDIO)
+                }) { Text("Gravar a calibração") }
+                if (pr != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Switch(checked = useProfile, onCheckedChange = { useProfile = it })
+                        Text("Usar meu teclado ao ouvir")
+                    }
+                    OutlinedButton(onClick = { profile = null; try { profFile.delete() } catch (_: Throwable) {} }) { Text("Apagar calibração") }
+                }
+            } else if (calPhase == 1) {
+                val ks = KeyboardProfile.PRESETS[calPreset]
+                Text("Gravando… ${"%d:%02d".format(calSecs.toInt() / 60, calSecs.toInt() % 60)} · toque de ${KeyboardProfile.noteName(ks.second)} até ${KeyboardProfile.noteName(ks.third)} (${ks.third - ks.second + 1} teclas)", style = MaterialTheme.typography.titleSmall)
+                LinearProgressIndicator(progress = { calLevel.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                Button(onClick = { finishCal() }) { Text("Terminei: aprender as teclas") }
+                OutlinedButton(onClick = { calRec.stop(); calPhase = 0 }) { Text("Descartar") }
+            } else {
+                Text("Aprendendo as teclas…", style = MaterialTheme.typography.titleSmall)
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+            calMsg?.let { Text(it, color = if (calOk) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error) }
         }
 
         Panel {

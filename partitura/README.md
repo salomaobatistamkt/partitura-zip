@@ -2,6 +2,10 @@
 
 Aplicativo de partituras para celular e tablet. Funciona offline.
 
+## Novidades da v0.12
+- **Regente refeito, corpo inteiro (Regência):** pernas, quadril, tronco, ombros, cotovelos, punhos, mão e dedos. O movimento nasce do gesto da mão direita e passa por uma cadeia com atraso (punho → cotovelo → ombro → tronco → quadril), então o corpo "segue" a mão: o tronco inclina para a frente no tempo forte, o quadril desce e os joelhos dobram, o peso muda de pé. Mão esquerda relaxada ao lado do corpo, ou espelhada em "Duas mãos". Vistas de costas / lado / frente (arraste para girar). Conferido por imagem (Java2D) e por teste de valores; **não testado no tablet**, e os padrões de regência continuam sem revisão de um regente de verdade.
+- **Calibrar o meu teclado (Ouvir):** você toca uma tecla por vez, da primeira à última (49/61/76/88 teclas), e o app aprende o som de cada tecla. Depois, ao gravar, ele decompõe o áudio nesses moldes. Em teste sintético (piano de SoundFont) acertou mais notas que o motor genérico e sem inventar tantas; **ainda não foi medido com o seu teclado real**.
+
 ## Novidades da v0.11
 - **Cursor amarelo**: a tela e o som agora contam o tamanho de cada compasso do mesmo jeito (antes divergiam quando uma pauta tinha compasso com soma diferente ou vazio), então o cursor não adianta mais.
 - **Letra e dinâmicas** ficam abaixo das notas e hastes mais baixas; o espaço entre pautas cresce quando precisa. Rodapé (©, direitos reservados) não vira mais letra.

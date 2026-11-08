@@ -207,9 +207,16 @@ class Heard(val notes: List<NoteEvent>, val engine: String, val seconds: Double)
 
 object Listener {
     /** Áudio → notas. Tenta o Basic Pitch; se falhar por qualquer motivo, usa o motor espectral próprio. */
-    fun hear(ctx: Context, audio: FloatArray, sr: Int, progress: (Float, String) -> Unit): Heard {
+    fun hear(ctx: Context, audio: FloatArray, sr: Int, profile: KeyboardProfile? = null, progress: (Float, String) -> Unit): Heard {
         val x = BasicPitch.normalize(audio)
         val secs = x.size.toDouble() / sr
+        if (profile != null) {
+            try {
+                progress(0f, "Moldes do seu teclado")
+                val notes = NmfTranscriber(profile).transcribe(x, sr) { progress(it, "Moldes do seu teclado") }
+                return Heard(notes, "Seu teclado calibrado (${profile.label.ifBlank { "${profile.keys} teclas" }})", secs)
+            } catch (_: Throwable) { /* cai para os outros motores */ }
+        }
         try {
             val m = BasicPitchModel(ctx)
             try {
