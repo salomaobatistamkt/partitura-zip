@@ -78,7 +78,7 @@ private val AREAS = listOf(
     Area(8, "Ouvir", "Tocar vira partitura", Ic.PIANO, Violet),
     Area(9, "Ler", "PDF vira notas", Ic.OPEN, Mint),
 )
-private val SECTIONS = listOf("CRIAR" to XX to listOf(3, 4), "ARQUIVOS" to listOf(5))
+private val SECTIONS = listOf("CRIAR" to listOf(0, 1, 9, 8, 7, 2), "APRENDER" to listOf(3, 4), "ARQUIVOS" to listOf(5))
 private val PHONE_TABS = listOf(0, 1, 9, 8, 99)
 
 @Composable
