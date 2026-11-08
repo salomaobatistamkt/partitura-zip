@@ -569,6 +569,42 @@ fun main() {
         val im2 = OmrImage.fromGray(gray, w, h); val im3 = OmrImage.fromGrayAdaptive(gray, w, h)
         check("OMR: binarização Otsu e adaptativa acham a pauta", Omr.detectStaves(im2).size == 1 && Omr.detectStaves(im3).size == 1)
     }
+    run {
+        // PDF sintético (fonte SMuFL via ToUnicode): 2 compassos de semínimas dó-ré-mi-fá | sol-lá-si-dó
+        val sp = 5.0
+        val sb = StringBuilder()
+        sb.append("0.4 w\n")
+        for (k in 0 until 5) sb.append("40 ${700 - k * sp} m 560 ${700 - k * sp} l S\n")
+        val bot = 700 - 4 * sp; val top = 700.0
+        for (x in listOf(40.0, 300.0, 560.0)) sb.append("0.8 w $x $bot m $x $top l S\n0.4 w\n")
+        sb.append("BT /F1 20 Tf 1 0 0 1 48 ${bot + sp} Tm <02> Tj ET\n")      // clave de Sol (linha 2 = sol)
+        val pos = listOf(-2, -1, 0, 1, 2, 3, 4, 5)   // C4 D4 E4 F4 G4 A4 B4 C5 -> posições a partir de E4 = 0: C4=-2
+        val xs = listOf(80.0, 130.0, 180.0, 230.0, 340.0, 390.0, 440.0, 490.0)
+        for ((i, p) in pos.withIndex()) {
+            val y = bot + p * sp / 2
+            sb.append("BT /F1 20 Tf 1 0 0 1 ${xs[i]} $y Tm <01> Tj ET\n")
+            val hx = xs[i] + 1.17 * sp
+            if (p < 4) sb.append("0.5 w $hx $y m $hx ${y + 3.5 * sp} l S\n") else { sb.append("0.5 w ${xs[i]} $y m ${xs[i]} ${y - 3.5 * sp} l S\n") }
+        }
+        val content = sb.toString()
+        val cmap = "/CIDInit /ProcSet findresource begin 12 dict begin begincmap 2 beginbfchar <01> <E0A4> <02> <E050> endbfchar endcmap end end"
+        val objs = listOf(
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+            "<< /Length ${content.length} >>\nstream\n$content\nendstream",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Bravura /ToUnicode 6 0 R >>",
+            "<< /Length ${cmap.length} >>\nstream\n$cmap\nendstream")
+        val pdf = StringBuilder("%PDF-1.4\n")
+        for ((i, o) in objs.withIndex()) pdf.append("${i + 1} 0 obj\n$o\nendobj\n")
+        pdf.append("trailer\n<< /Root 1 0 R /Size 7 >>\nstartxref\n0\n%%EOF\n")
+        val r = try { VectorOmr.read(pdf.toString().toByteArray(Charsets.ISO_8859_1), OmrOptions()) } catch (e: Throwable) { println("erro: $e"); null }
+        val got = r?.score?.parts?.firstOrNull()?.measures?.flatMap { m -> m.notes.map { it.pitch?.toString() } }?.joinToString(" ")
+        check("PDF vetorial: lê 2 compassos de semínimas (${got})", r != null && r.bars == 2 && got == "C4 D4 E4 F4 G4 A4 B4 C5")
+        check("PDF vetorial: 4/4 e armadura vazia", r != null && r.score.beats == 4 && r.score.fifths == 0)
+        val nonMusic = VectorOmr.read("%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n".toByteArray(), OmrOptions())
+        check("PDF vetorial: PDF sem notação devolve null (usa leitor de imagem)", nonMusic == null)
+    }
     println(if (fails == 0) "TODOS OS TESTES PASSARAM" else "$fails FALHAS")
     kotlin.system.exitProcess(if (fails == 0) 0 else 1)
 }

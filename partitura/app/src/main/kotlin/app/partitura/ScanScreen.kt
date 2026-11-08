@@ -63,6 +63,7 @@ fun ScanScreen(state: AppState) {
     var lastUri by remember { mutableStateOf<Uri?>(null) }
     var lastIsPdf by remember { mutableStateOf(true) }
     var photo by rememberSaveable { mutableStateOf(false) }
+    var mode by remember { mutableStateOf("") }
 
     fun run(uri: Uri, isPdf: Boolean) {
         busy = true; error = null; result = null; prog = 0f; progText = "Abrindo…"
@@ -73,22 +74,30 @@ fun ScanScreen(state: AppState) {
                 val results = ArrayList<OmrResult>()
                 val opts = OmrOptions(title = title.ifBlank { "Partitura lida" }, beats = beats, beatType = beatType)
                 if (isPdf) {
+                    // 1) PDF digital (Sibelius, MuseScore, Finale…): leitura vetorial exata, direto dos símbolos do arquivo
+                    val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw IllegalStateException("Não consegui abrir o PDF.")
+                    main.post { progText = "Lendo os símbolos do PDF…" }
+                    val vec = if (photo) null else try {
+                        VectorOmr.read(bytes, opts) { i, n -> main.post { prog = i / n.toFloat(); progText = "Lendo página ${minOf(i + 1, n)} de $n…" } }
+                    } catch (e: Throwable) { null }
+                    if (vec != null && vec.notes > 0) { main.post { result = vec; busy = false; mode = "vetorial" }; return@Thread }
+                    // 2) PDF escaneado: desenha cada página e reconhece pela imagem
                     val fd = ctx.contentResolver.openFileDescriptor(uri, "r") ?: throw IllegalStateException("Não consegui abrir o PDF.")
                     val pr = PdfRenderer(fd)
                     try {
                         val n = minOf(pr.pageCount, 40)
                         for (i in 0 until n) {
-                            main.post { prog = i / n.toFloat(); progText = "Lendo página ${i + 1} de $n…" }
+                            main.post { prog = i / n.toFloat(); progText = "Lendo página ${i + 1} de $n (imagem)…" }
                             var width = 1700
                             var bm = renderPdfPage(pr, i, width)
                             var im = toOmr(bm, adaptive); bm.recycle()
                             val sp = medianSpace(im)
-                            if (sp in 1.0..8.5 && width < 3200) {          // pauta pequena: renderiza maior
+                            if (sp in 1.0..8.5 && width < 3200) {
                                 width = minOf(3200, (width * 10.0 / sp).toInt())
                                 bm = renderPdfPage(pr, i, width); im = toOmr(bm, adaptive); bm.recycle()
                             }
                             try { results += Omr.read(im, opts) }
-                            catch (e: IllegalStateException) { if (n == 1) throw e }     // página sem pauta (capa, texto)
+                            catch (e: IllegalStateException) { if (n == 1) throw e }
                         }
                         if (pr.pageCount > n) throw IllegalStateException("O PDF tem ${pr.pageCount} páginas; li as $n primeiras.")
                     } finally { pr.close() }
@@ -105,7 +114,7 @@ fun ScanScreen(state: AppState) {
                 }
                 if (results.isEmpty()) throw IllegalStateException("Não encontrei pautas em nenhuma página.")
                 val merged = if (results.size == 1) results[0] else Omr.merge(results, opts.title)
-                main.post { result = merged; busy = false }
+                main.post { result = merged; busy = false; mode = "imagem" }
             } catch (e: Throwable) {
                 main.post { error = e.message ?: e.toString(); busy = false }
             }
@@ -155,10 +164,12 @@ fun ScanScreen(state: AppState) {
         if (r != null) {
             Panel {
                 Text("Resultado", style = MaterialTheme.typography.titleMedium)
-                Text("${r.notes} notas · ${r.bars} compassos · ${r.score.parts.size} pauta(s) por sistema · tom ${if (r.score.fifths == 0) "sem armadura" else if (r.score.fifths > 0) "${r.score.fifths}♯" else "${-r.score.fifths}♭"} · ${r.score.beats}/${r.score.beatType}")
+                Text((if (mode == "vetorial") "Leitura direta do PDF (exata) · " else "Leitura por imagem (aproximada) · ") + "${r.notes} notas · ${r.bars} compassos · ${r.score.parts.size} pauta(s) · tom ${if (r.score.fifths == 0) "sem armadura" else if (r.score.fifths > 0) "${r.score.fifths}♯" else "${-r.score.fifths}♭"} · ${r.score.beats}/${r.score.beatType}")
                 r.warnings.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-                StaticScore(r.score, 0, 360.dp)
-                Text("Confira no Estúdio: leitura óptica pode errar notas, ritmos e acidentes. Ainda não lê tercinas, ligaduras, letras e dinâmicas.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val preview = remember(r) { r.score.copyDeep().also { sc -> sc.parts.forEach { p -> while (p.measures.size > 8) p.measures.removeAt(p.measures.size - 1) } } }
+                Text("Prévia dos 8 primeiros compassos (a partitura inteira abre no Estúdio):", style = MaterialTheme.typography.bodySmall)
+                StaticScore(preview, 0, 360.dp)
+                Text("Confira no Estúdio. Lê notas, ritmos, tercinas, ligaduras de valor, letra e cifras de PDF digital; não lê dinâmicas, articulações nem repetições. Foto e PDF escaneado são menos precisos.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(onClick = { state.open(r.score.copyDeep(), title.ifBlank { "Partitura lida" }); state.goStudio() }) { Text("Abrir no Estúdio") }
                     OutlinedButton(onClick = { state.saveAs(title.ifBlank { "Partitura lida" } + ".musicxml", MusicXml.write(r.score).toByteArray()) }) { Text("Salvar MusicXML") }
