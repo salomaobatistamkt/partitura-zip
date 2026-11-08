@@ -396,6 +396,39 @@ fun main() {
         val ms = (System.nanoTime() - t0) / 1_000_000
         check("Criatividade: 40 versos em ${ms} ms (limite 5 s)", ms < 5000 && Validate.measureDurations(big.score).isEmpty())
     }
+    run {
+        val letra = "Eu quero ver o sol brilhar\nno céu azul da minha vida\n\nO amor é uma canção\nque nasce no meu coração"
+        var okAll = true; var why = ""; var par = 0; var cnt = 0
+        for ((fifths, minor) in listOf(0 to false, -3 to false, 2 to true, 0 to true)) for ((b, t) in listOf(4 to 4, 3 to 4, 2 to 4, 6 to 8, 12 to 8, 5 to 4, 3 to 8, 2 to 2, 7 to 8)) for (cpb in 1..2) {
+            val base = Compose.compose(letra, CreativeSettings(fifths = fifths, minor = minor, beats = b, beatType = t, chordsPerBar = cpb, seed = (b + cpb).toLong(), sevenths = cpb == 2)).score
+            for (sty in Arrange.PIANO_STYLES) try {
+                val r = Arrange.addPiano(base, sty.id)
+                if (r.parts.size != 3 || Validate.measureDurations(r).isNotEmpty()) { okAll = false; why = "piano ${sty.id} $b/$t: ${Validate.measureDurations(r).take(2)}" }
+                if (r.parts[1].measures.flatMap { it.notes }.none { it.pitch != null } || r.parts[2].measures.flatMap { it.notes }.none { it.pitch != null }) { okAll = false; why = "piano vazio ${sty.id} $b/$t" }
+                val rt = MusicXml.parse(MusicXml.write(r).toByteArray())
+                if (rt.parts.size != 3 || Validate.measureDurations(rt).isNotEmpty()) { okAll = false; why = "piano ida e volta ${sty.id} $b/$t" }
+                Engrave.scene(r, 70f); Synth.render(r, 100)
+            } catch (e: Throwable) { okAll = false; why = "exceção piano ${sty.id} $b/$t: $e" }
+            for (vm in Arrange.VOICE_MODES) try {
+                val r = Arrange.addVoices(base, vm.id, true)
+                if (r.parts.size != 1 + vm.insts.size || Validate.measureDurations(r).isNotEmpty()) { okAll = false; why = "vozes ${vm.id} $b/$t: ${Validate.measureDurations(r).take(2)}" }
+                val mel = base.parts[0].measures.flatMap { it.notes }
+                if (vm.id != "baixo") for (k in 1 until r.parts.size) {
+                    val nn = r.parts[k].measures.flatMap { it.notes }
+                    if (nn.size != mel.size || nn.count { it.lyric != null } != mel.count { it.lyric != null && it.pitch != null }) { okAll = false; why = "vozes ${vm.id} contagem $b/$t ${nn.size} vs ${mel.size}" }
+                    if (nn.zip(mel).any { (x, y) -> x.pitch != null && y.pitch != null && x.pitch!!.midi >= y.pitch!!.midi }) { okAll = false; why = "voz ${vm.id} cruzou a melodia $b/$t" }
+                }
+                if (vm.id == "satb") { cnt++; par += Arrange.parallels(r, listOf(0, 1, 2, 3)) ; val nn = (1..3).map { r.parts[it].measures.flatMap { m -> m.notes } }
+                    if ((0 until nn[0].size).any { i -> val a = nn[0][i].pitch?.midi; val tt = nn[1][i].pitch?.midi; val bb = nn[2][i].pitch?.midi; a != null && tt != null && bb != null && !(a > tt && tt > bb) }) { okAll = false; why = "satb cruzamento $b/$t" } }
+                MusicXml.parse(MusicXml.write(r).toByteArray()); Engrave.scene(r, 70f); Synth.render(r, 100)
+            } catch (e: Throwable) { okAll = false; why = "exceção vozes ${vm.id} $b/$t: $e" }
+        }
+        check("Arranjo: 6 estilos de piano × 4 modos de vozes × 4 tons × 9 compassos: válido, ida e volta, grava e toca ($why)", okAll)
+        check("Coral SATB: $par paralelas de 5ª/8ª em $cnt arranjos (limite 3%)", par == 0)
+        val big = Compose.compose((1..60).joinToString("\n") { "essa é a linha número um de uma canção longa e bonita" }, CreativeSettings(seed = 3)).score
+        val t0 = System.nanoTime(); val bigA = Arrange.addVoices(Arrange.addPiano(big, "arpejo"), "satb", true); val ms = (System.nanoTime() - t0) / 1_000_000
+        check("Arranjo de 60 versos (piano + coral) em $ms ms (limite 5 s)", ms < 5000 && Validate.measureDurations(bigA).isEmpty())
+    }
     println(if (fails == 0) "TODOS OS TESTES PASSARAM" else "$fails FALHAS")
     kotlin.system.exitProcess(if (fails == 0) 0 else 1)
 }

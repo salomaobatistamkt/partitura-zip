@@ -232,4 +232,12 @@ object Edit {
         s.parts += Part("P1", "Piano", MutableList(measures) { Measure(it + 1, mutableListOf(Note(null, len))) })
         return s
     }
+
+    /** Troca (ou apaga, com h = null) o acorde que começa em [at] no compasso [m] da parte [p]. */
+    fun setChord(s: Score, p: Int, m: Int, at: Int, h: Harmony?) {
+        val ms = s.parts.getOrNull(p)?.measures?.getOrNull(m) ?: return
+        ms.harmony.removeAll { it.at == at }
+        if (h != null) ms.harmony.add(h.copy(at = at))
+        ms.harmony.sortBy { it.at }
+    }
 }

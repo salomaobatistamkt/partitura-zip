@@ -300,7 +300,7 @@ object Engrave {
             val onsetQ = startQ + e.onset / div
             if (!e.rest) measure.notes.getOrNull(e.heads[0].idx)?.let { lyricShown(it) }?.let { items += Txt(it, x - 0.1f, top + 4f + 3.7f, LYRIC_SIZE) }
             if (e.rest) {
-                val whole = e.dur >= bar && !multiVoice
+                val whole = e.dur >= s.divisions * 4 * s.beats / s.beatType && !multiVoice
                 val lvl = if (whole) 0 else v.level
                 val rpos = when {
                     lvl == 0 -> 6; lvl == 1 -> 4; else -> 4
