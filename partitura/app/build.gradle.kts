@@ -6,7 +6,7 @@ plugins {
 android {
     namespace = "app.partitura"
     compileSdk = 35
-    defaultConfig { applicationId = "app.partitura"; minSdk = 26; targetSdk = 35; versionCode = 6; versionName = "0.6.0" }
+    defaultConfig { applicationId = "app.partitura"; minSdk = 26; targetSdk = 35; versionCode = 7; versionName = "0.7.0" }
     signingConfigs {
         getByName("debug") { storeFile = file("debug.keystore"); storePassword = "android"; keyAlias = "androiddebugkey"; keyPassword = "android" }
     }

@@ -2,6 +2,10 @@
 
 Aplicativo de partituras para celular e tablet. Funciona offline.
 
+## Novidades da v0.7
+- **Ler** (nova aba): abre PDF ou imagem de partitura e converte em notas editáveis, 100% no aparelho (sem servidor). Leitor próprio em Kotlin (`core/Omr.kt`): pautas, claves de Sol/Fá, armadura, fórmula de compasso, notas cheias/vazias, pausas, pontos, acidentes, colcheias/barras, sistemas de 1–2 pautas.
+- **Limites honestos**: funciona bem com partitura impressa nítida (PDF digital). Fotos tortas ou com sombra: modo "é uma foto" ajuda, mas não corrige inclinação. Ainda não lê tercinas, ligaduras, letras, dinâmicas, claves de Dó nem várias vozes numa pauta. Acordes de semibreves empilhadas e outras fontes musicais (além de Bravura/Leland) são menos precisos. Sempre confira no Estúdio.
+
 ## Novidades da v0.6
 
 - **Ouvir** (nova aba): grave no microfone ou importe um áudio (WAV, MP3, M4A, OGG, FLAC) e o app monta uma partitura inicial: melodia, cifras e, se quiser, acompanhamento de piano. Tudo no aparelho, sem internet.

@@ -555,6 +555,20 @@ fun main() {
         val (back, srr) = Dsp.readWav(wav)
         check("WAV: leitura de volta (${back.size} amostras, ${srr} Hz)", back.size == 2205 && srr == Synth.RATE)
     }
+    run {
+        // OMR: pauta sintética (5 linhas, espaço 10 px) + notas cheias com haste
+        val w = 900; val h = 300
+        val ink = BooleanArray(w * h)
+        for (k in 0 until 5) for (x in 40 until 860) for (t in 0..1) ink[(100 + k * 10 + t) * w + x] = true
+        for (y in 0 until h) for (t in 0..1) { ink[y.coerceIn(95, 145) * w + 40 + t] = true }
+        val st = Omr.detectStaves(OmrImage(w, h, ink))
+        check("OMR: detecta 1 pauta com espaço ~10 px (${st.size})", st.size == 1 && Math.abs(st[0].space - 10.0) < 1.0)
+        val blank = try { Omr.read(OmrImage(400, 300, BooleanArray(400 * 300)), OmrOptions()); false } catch (e: IllegalStateException) { true }
+        check("OMR: página em branco gera erro claro, sem travar", blank)
+        val gray = IntArray(w * h) { if (ink[it]) 0 else 255 }
+        val im2 = OmrImage.fromGray(gray, w, h); val im3 = OmrImage.fromGrayAdaptive(gray, w, h)
+        check("OMR: binarização Otsu e adaptativa acham a pauta", Omr.detectStaves(im2).size == 1 && Omr.detectStaves(im3).size == 1)
+    }
     println(if (fails == 0) "TODOS OS TESTES PASSARAM" else "$fails FALHAS")
     kotlin.system.exitProcess(if (fails == 0) 0 else 1)
 }
