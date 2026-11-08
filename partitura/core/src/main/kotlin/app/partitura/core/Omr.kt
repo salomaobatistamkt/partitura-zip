@@ -55,7 +55,7 @@ class OmrOptions(
     val title: String = "Partitura lida",
     /** compasso forçado; null = deduzir da soma dos compassos */
     val beats: Int? = null, val beatType: Int = 4,
-    val tempo: Int = 100,
+    val tempo: Int = 80,
 )
 
 class OmrResult(val score: Score, val staves: Int, val systems: Int, val notes: Int, val bars: Int, val adjustedBars: Int, val warnings: List<String>)

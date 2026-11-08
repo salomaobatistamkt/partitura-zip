@@ -243,7 +243,24 @@ class AppState(private val app: Context) {
     var sideMode by mutableIntStateOf(prefs.getInt("side", -1))
     fun applySide(v: Int) { sideMode = v; prefs.edit().putInt("side", v).apply() }
     fun applyDark(v: Boolean) { dark = v; prefs.edit().putBoolean("dark", v).apply() }
+    /** Banco de sons realista (SoundFont): "carregando", "pronto" ou "indisponível". */
+    var bankState by mutableStateOf("carregando")
+        private set
+    var realSound by mutableStateOf(prefs.getBoolean("real_sound", true))
+        private set
+    fun applyRealSound(v: Boolean) { realSound = v; Synth.useSoundBank = v; prefs.edit().putBoolean("real_sound", v).apply() }
     init {
+        Synth.useSoundBank = realSound
+        thread {
+            try {
+                val bank = app.assets.open("GeneralUser-GS.sf2").use { Sf2.load(it) }
+                SoundBank.sf2 = bank
+                Handler(Looper.getMainLooper()).post { bankState = "pronto" }
+            } catch (e: Throwable) {
+                SoundBank.sf2 = null
+                Handler(Looper.getMainLooper()).post { bankState = "indisponível" }
+            }
+        }
         // migração: a chave antiga (texto puro) vira texto cifrado e o original é apagado
         val old = prefs.getString("omr_token", null)
         if (old != null) {

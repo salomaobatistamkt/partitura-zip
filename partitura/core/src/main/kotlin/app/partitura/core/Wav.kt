@@ -100,7 +100,8 @@ object Synth {
         val end = (all.maxOfOrNull { minOf(it.startSec + it.durSec, toSec) } ?: fromSec) + 1.0
         val total = ((end - fromSec) * RATE).toInt().coerceAtLeast(1)
         val timbres = s.parts.map { Timbre.of(it.inst) }
-        val room = Room(0.5)
+        val bank = if (useSoundBank) SoundBank.sf2 else null
+        val room = Room(if (bank != null) 0.28 else 0.5)
         var pos = 0; var evIdx = 0
         var carry = DoubleArray(0)
         return Prepared(total) {
@@ -112,7 +113,7 @@ object Synth {
                     val e = all[evIdx]
                     val st = ((e.startSec - fromSec) * RATE).toInt().coerceAtLeast(0)
                     if (st >= w1 && w1 < total) break
-                    sel += e; maxEnd = maxOf(maxEnd, st + ((e.durSec + 0.5) * RATE).toInt() + 1); evIdx++
+                    sel += e; maxEnd = maxOf(maxEnd, st + ((e.durSec + (if (bank != null) 2.6 else 0.5)) * RATE).toInt() + 1); evIdx++
                 }
                 val buf = DoubleArray(maxOf(maxEnd, pos + carry.size) - pos)
                 System.arraycopy(carry, 0, buf, 0, carry.size)
@@ -120,11 +121,13 @@ object Synth {
                     val st = ((e.startSec - fromSec) * RATE).toInt().coerceAtLeast(0)
                     if (mix == null) {
                         val tb = timbres.getOrElse(e.part) { Timbre.PIANO }
-                        renderNote(e, tb, volumes.getOrElse(e.part) { 1.0 } * 0.22 * tb.gain, buf, st - pos)
+                        val v = volumes.getOrElse(e.part) { 1.0 }
+                        if (bank != null) renderSf(bank, e, tb, v, buf, st - pos) else renderNote(e, tb, v * 0.22 * tb.gain, buf, st - pos)
                     } else for (ti in mix.tracksFor(e.part, e.voice, e.mi)) {
                         if (!mix.audible(ti)) continue
                         val tb = Timbre.of(mix.timbreId(ti, s))
-                        renderNote(e, tb, mix.volume[ti] * volumes.getOrElse(e.part) { 1.0 } * 0.22 * tb.gain, buf, st - pos)
+                        val v = mix.volume[ti] * volumes.getOrElse(e.part) { 1.0 }
+                        if (bank != null) renderSf(bank, e, tb, v, buf, st - pos) else renderNote(e, tb, v * 0.22 * tb.gain, buf, st - pos)
                     }
                 }
                 room.process(buf, len)
@@ -141,6 +144,18 @@ object Synth {
         val out = ShortArray(p.total); var o = 0
         while (true) { val c = p.next() ?: break; System.arraycopy(c, 0, out, o, c.size); o += c.size }
         return out
+    }
+
+    /** Liga/desliga o banco de sons realista (SoundFont) quando ele estiver carregado. */
+    @Volatile var useSoundBank = true
+
+    /** Ganho por timbre quando se usa o SoundFont (coro e pads vêm mais fortes nas amostras, piano menos). */
+    private fun sfGain(id: String) = when (id) { "voice", "voice_oo" -> 1.3; "strings", "pad" -> 1.2; "organ" -> 1.1; "brass", "reed" -> 1.2; "bass" -> 2.0; "piano_soft" -> 1.35; else -> 1.55 }
+
+    private fun renderSf(sf: Sf2, e: Event, tb: Timbre, vol: Double, buf: DoubleArray, s0: Int) {
+        val prog = Sf2.programOf(tb.id)
+        val hold = if (tb.id == "piano" || tb.id == "piano_soft" || tb.id == "harp" || tb.id == "guitar" || tb.id == "epiano") e.durSec + 0.12 else e.durSec
+        sf.render(prog, e.midi.coerceIn(0, 127), (if (tb.id == "piano_soft") e.vel * 0.85 else e.vel.toDouble()).toInt().coerceIn(1, 127), hold, vol * sfGain(tb.id), buf, s0, RATE)
     }
 
     /** Soma uma nota em [buf] a partir da amostra [s0] (pode ser negativa: nota que começou no pedaço anterior não ocorre, mas fica seguro). */

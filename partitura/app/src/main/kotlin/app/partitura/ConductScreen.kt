@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -42,6 +43,8 @@ fun ConductScreen(state: AppState) {
     val options = remember(beats, beatType) { Conducting.options(beats, beatType) }
     val pattern = remember(beats, beatType, opt) { Conducting.forMeter(beats, beatType, opt) }
     var anim by remember { mutableStateOf(false) }
+    var twoHands by remember { mutableStateOf(false) }
+    var showHands by remember { mutableStateOf(true) }
     var freeQ by remember { mutableDoubleStateOf(0.0) }
 
     // anacruse: se o primeiro compasso é incompleto, os compassos seguintes ainda começam no tempo 1
@@ -93,7 +96,7 @@ fun ConductScreen(state: AppState) {
                 )
             }
 
-            val stage: @Composable (Modifier) -> Unit = { m -> Stage(pattern, phaseNow, curBeat, m) }
+            val stage: @Composable (Modifier) -> Unit = { m -> Stage(pattern, phaseNow, curBeat, twoHands, showHands, m) }
             val side: @Composable () -> Unit = {
                 Panel {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -141,6 +144,11 @@ fun ConductScreen(state: AppState) {
                 }
                 Stepper("Andamento (♩ por minuto)", "${state.tempo}", { state.tempo = (state.tempo - 5).coerceAtLeast(30) }, { state.tempo = (state.tempo + 5).coerceAtMost(220) })
                 if (musicOn) Text("Mudar o andamento aqui vale na próxima vez que tocar a música.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SectionTitle("Mãos")
+                Wrap {
+                    FilterChip(selected = showHands, onClick = { showHands = !showHands }, label = { Text("Mostrar a mão") })
+                    FilterChip(selected = twoHands, onClick = { twoHands = !twoHands }, label = { Text("Duas mãos (espelhadas)") })
+                }
                 SectionTitle("Fórmula de compasso")
                 Wrap {
                     Conducting.METERS.forEach { (b, bt) ->
@@ -175,7 +183,7 @@ fun ConductScreen(state: AppState) {
 }
 
 @Composable
-private fun Stage(pattern: ConductPattern, phaseNow: () -> Double, curBeat: Int, modifier: Modifier) {
+private fun Stage(pattern: ConductPattern, phaseNow: () -> Double, curBeat: Int, twoHands: Boolean, showHands: Boolean, modifier: Modifier) {
     val cs = MaterialTheme.colorScheme
     val primary = cs.primary; val onPrimary = cs.onPrimary; val onSurface = cs.onSurface; val muted = cs.onSurfaceVariant; val surface = cs.surface; val outline = cs.outline
     val path = remember(pattern) { pattern.path(48) }
@@ -228,8 +236,17 @@ private fun Stage(pattern: ConductPattern, phaseNow: () -> Double, curBeat: Int,
                     drawCircle(primary.copy(alpha = 1f - k), (16f + 34f * k) * dp, o, style = Stroke(width = 3f * dp))
                 }
             }
+            // mão(s): antebraço preso ao cotovelo (fora da tela), palma, dedos e polegar; "afunda" um pouco no ictus
+            if (showHands) {
+                val frac = if (ph >= 0) ph - floor(ph) else 1.0
+                val squash = if (ph >= 0 && frac < 0.18) 1f - 0.10f * (1f - (frac / 0.18).toFloat()) else 1f
+                val ang = if (ph >= 0) { val a = px(pattern.position(ph - 0.03)); val c = px(pattern.position(ph + 0.03)); kotlin.math.atan2(c.x - a.x, -(c.y - a.y)) * 0.35f } else 0f
+                val o = px(if (ph >= 0) pattern.position(ph) else pattern.waypoints.last())
+                drawHand(o, Offset(w * 0.80f, h * 1.12f), false, squash, ang, dp)
+                if (twoHands) drawHand(Offset(w - o.x, o.y), Offset(w * 0.20f, h * 1.12f), true, squash, -ang, dp)
+            }
             // batuta com rastro
-            if (ph >= 0) {
+            if (ph >= 0 && !showHands) {
                 for (k in 10 downTo 1) {
                     val o = px(pattern.position(ph - k * 0.022))
                     drawCircle(primary.copy(alpha = 0.55f * (1f - k / 11f)), (9f - k * 0.55f).coerceAtLeast(2f) * dp, o)
@@ -238,13 +255,50 @@ private fun Stage(pattern: ConductPattern, phaseNow: () -> Double, curBeat: Int,
                 drawCircle(primary.copy(alpha = 0.30f), 20f * dp, o)
                 drawCircle(onSurface, 10f * dp, o)
                 drawCircle(primary, 10f * dp, o, style = Stroke(width = 3f * dp))
-            } else {
+            } else if (!showHands) {
                 val o = px(pattern.waypoints.last())
                 drawCircle(onSurface.copy(alpha = 0.9f), 10f * dp, o)
                 drawCircle(primary, 10f * dp, o, style = Stroke(width = 3f * dp))
                 txt.color = muted.toArgb(); txt.textSize = 12f * dp; txt.isFakeBoldText = false
                 drawIntoCanvas { it.nativeCanvas.drawText("posição de preparação", o.x, o.y - 18f * dp, txt) }
             }
+        }
+    }
+}
+
+
+/** Desenha uma mão (palma para baixo, vista de cima) com antebraço até o cotovelo [elbow]. [o] = centro da palma. */
+private fun DrawScope.drawHand(o: Offset, elbow: Offset, left: Boolean, squash: Float, tilt: Float, dp: Float) {
+    val skin = Color(0xFFE9B994); val edge = Color(0xFF8A5A3C); val sleeve = Color(0xFF2B3A55)
+    val dx = o.x - elbow.x; val dy = o.y - elbow.y
+    val len = hypot(dx, dy).coerceAtLeast(1f)
+    val ux = dx / len; val uy = dy / len                       // do cotovelo para a mão
+    val ang = kotlin.math.atan2(ux, -uy) + tilt                // 0 = mão apontando para cima
+    val sc = squash * dp
+    // antebraço: manga + pulso
+    val wrist = Offset(o.x - ux * 26f * sc, o.y - uy * 26f * sc)
+    drawLine(sleeve, elbow, Offset(o.x - ux * 70f * sc, o.y - uy * 70f * sc), strokeWidth = 40f * dp, cap = StrokeCap.Round)
+    drawLine(edge, Offset(o.x - ux * 70f * sc, o.y - uy * 70f * sc), wrist, strokeWidth = 24f * dp, cap = StrokeCap.Round)
+    drawLine(skin, Offset(o.x - ux * 70f * sc, o.y - uy * 70f * sc), wrist, strokeWidth = 21f * dp, cap = StrokeCap.Round)
+    rotate(degrees = Math.toDegrees(ang.toDouble()).toFloat(), pivot = o) {
+        val sgn = if (left) -1f else 1f
+        // palma
+        drawRoundRect(edge, Offset(o.x - 25f * sc, o.y - 18f * sc), androidx.compose.ui.geometry.Size(50f * sc, 40f * sc), androidx.compose.ui.geometry.CornerRadius(14f * sc))
+        drawRoundRect(skin, Offset(o.x - 23f * sc, o.y - 16f * sc), androidx.compose.ui.geometry.Size(46f * sc, 36f * sc), androidx.compose.ui.geometry.CornerRadius(12f * sc))
+        // dedos (leve leque)
+        val lens = floatArrayOf(25f, 31f, 29f, 22f)
+        for (i in 0 until 4) {
+            val fx = o.x + (-17f + i * 11.4f) * sc * sgn
+            val a = (-9f + i * 6f) * sgn
+            rotate(degrees = a, pivot = Offset(fx, o.y - 14f * sc)) {
+                drawRoundRect(edge, Offset(fx - 6.2f * sc, o.y - 14f * sc - lens[i] * sc), androidx.compose.ui.geometry.Size(12.4f * sc, lens[i] * sc + 8f * sc), androidx.compose.ui.geometry.CornerRadius(6.2f * sc))
+                drawRoundRect(skin, Offset(fx - 5f * sc, o.y - 14f * sc - lens[i] * sc + 1.2f * sc), androidx.compose.ui.geometry.Size(10f * sc, lens[i] * sc + 6f * sc), androidx.compose.ui.geometry.CornerRadius(5f * sc))
+            }
+        }
+        // polegar
+        rotate(degrees = -52f * sgn, pivot = Offset(o.x - 22f * sc * sgn, o.y + 6f * sc)) {
+            drawRoundRect(edge, Offset(o.x - 22f * sc * sgn - 7f * sc, o.y + 6f * sc - 26f * sc), androidx.compose.ui.geometry.Size(14f * sc, 32f * sc), androidx.compose.ui.geometry.CornerRadius(7f * sc))
+            drawRoundRect(skin, Offset(o.x - 22f * sc * sgn - 5.8f * sc, o.y + 6f * sc - 24.8f * sc), androidx.compose.ui.geometry.Size(11.6f * sc, 29.6f * sc), androidx.compose.ui.geometry.CornerRadius(5.8f * sc))
         }
     }
 }

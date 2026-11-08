@@ -2,6 +2,12 @@
 
 Aplicativo de partituras para celular e tablet. Funciona offline.
 
+## Novidades da v0.10
+- **Som com instrumentos reais**: piano, coro (aah/ooh), cordas, órgão, flauta etc. tocam por amostras de um SoundFont livre (GeneralUser GS, licença própria que permite uso em software; ver `app/src/main/assets/GENERALUSER-GS-LICENSE.txt`). Em Reprodução dá para voltar ao som sintetizado. A exportação WAV/M4A usa o mesmo som.
+- **Regência com mão animada**: antebraço, palma, dedos e polegar seguem o gesto e "afundam" no tempo; opção de duas mãos espelhadas.
+- Quando o PDF não traz o andamento escrito, o app avisa e usa 80 bpm (ajustável).
+- **Limites honestos**: o som real não foi ouvido num aparelho (só medido em computador); repetições com 3 estrofes não escritas no PDF (ex.: Deus de Vivos toca 3 vezes no seu áudio) ainda tocam 2 vezes.
+
 ## Novidades da v0.9
 - **Leitura de PDF mais precisa**: repetições, casas 1./2., mudança de tonalidade/compasso, dinâmicas (pp–ff, mf, mp), crescendo/diminuendo, andamento, rit., fermata; pautas vazias ocultas alinhadas; duas vozes por pauta.
 - **Ouvir**: modo padrão com clave de Sol e Fá (arranjo completo de piano) ou só melodia.

@@ -723,6 +723,7 @@ object VectorOmr {
         val labels = arrayOfNulls<String>(n)
         var notes = 0; var adjusted = 0; var bars = 0
         val scoreTempo = tempo ?: o.tempo
+        if (tempo == null) warnings += "O PDF não traz o andamento escrito (♩ = número). Usei $scoreTempo bpm; ajuste em Reprodução → Andamento."
         var curTempo = scoreTempo
         val dbg = System.getProperty("vdbg3") != null
         for ((si, sd) in systems.withIndex()) {

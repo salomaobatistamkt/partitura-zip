@@ -375,6 +375,14 @@ private fun MixerSheet(state: AppState, s: Score, onClose: () -> Unit) {
         Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("Reprodução", style = MaterialTheme.typography.titleLarge)
             Column {
+                Text("Qualidade do som", style = MaterialTheme.typography.titleSmall)
+                Wrap {
+                    FilterChip(selected = state.realSound, onClick = { state.applyRealSound(true); state.restartIfPlaying() }, label = { Text("Instrumentos reais") })
+                    FilterChip(selected = !state.realSound, onClick = { state.applyRealSound(false); state.restartIfPlaying() }, label = { Text("Sintetizado") })
+                }
+                if (state.realSound && state.bankState != "pronto") Text(if (state.bankState == "carregando") "Carregando os instrumentos…" else "Instrumentos reais indisponíveis; usando o som sintetizado.", style = MaterialTheme.typography.bodySmall)
+            }
+            Column {
                 Text("Andamento: ${state.tempo} bpm (original ${s.tempo}) · o tom não muda", style = MaterialTheme.typography.titleSmall)
                 Slider(value = state.tempo.toFloat(), onValueChange = { state.tempo = it.toInt() }, valueRange = 10f..240f, onValueChangeFinished = { state.restartIfPlaying() })
                 Wrap {
