@@ -119,11 +119,14 @@ class Player {
     }
 
     /** Metrônomo em laço: [beats] cliques de [beatSec]; a posição segue em "segundos de música" ao andamento [tempo]. */
-    fun startClick(beats: Int, beatSec: Double, tempo: Int) {
+    fun startClick(beats: Int, beatSec: Double, tempo: Int) = startClickLens(List(beats) { 1.0 }, beatSec, tempo)
+
+    /** Metrônomo com gestos desiguais: [lens] em semínimas, [quarterSec] = duração de uma semínima. */
+    fun startClickLens(lens: List<Double>, quarterSec: Double, tempo: Int) {
         stop()
         val my = token
         kind = "click"
-        val pcm = Synth.clickLoop(beats, beatSec)
+        val pcm = Synth.clickLoopLens(lens, quarterSec)
         try {
             val t = newTrack(pcm.size)
             t.write(pcm, 0, pcm.size)
@@ -215,6 +218,9 @@ class AppState(private val app: Context) {
     var openPicker: () -> Unit = {}
     var saveAs: (String, ByteArray) -> Unit = { _, _ -> }
 
+    /** Menu lateral: -1 automático, 0 aberto, 1 compacto (só ícones), 2 escondido. */
+    var sideMode by mutableIntStateOf(prefs.getInt("side", -1))
+    fun applySide(v: Int) { sideMode = v; prefs.edit().putInt("side", v).apply() }
     fun applyDark(v: Boolean) { dark = v; prefs.edit().putBoolean("dark", v).apply() }
     fun applyServer(url: String, token: String) {
         serverUrl = cleanServer(url); serverToken = token.trim()

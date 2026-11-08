@@ -84,30 +84,55 @@ fun HomeScreen(state: AppState) {
 private fun NewDialog(onDismiss: () -> Unit, onCreate: (Score) -> Unit) {
     var title by remember { mutableStateOf("Nova partitura") }
     var fifths by remember { mutableIntStateOf(0) }
-    var ts by remember { mutableIntStateOf(0) }
-    var bars by remember { mutableIntStateOf(32) }
+    var beats by remember { mutableIntStateOf(4) }
+    var beatType by remember { mutableIntStateOf(4) }
+    var barsText by remember { mutableStateOf("32") }
     var tempo by remember { mutableIntStateOf(100) }
-    var instIdx by remember { mutableIntStateOf(0) }
-    val sigs = listOf(4 to 4, 3 to 4, 2 to 4, 6 to 8, 12 to 8, 2 to 2)
+    val chosen = remember { mutableStateListOf("piano") }
+    val common = listOf(4 to 4, 3 to 4, 2 to 4, 2 to 2, 3 to 2, 6 to 8, 9 to 8, 12 to 8, 5 to 4, 6 to 4, 7 to 4, 3 to 8, 5 to 8, 7 to 8, 1 to 4)
+    val bars = barsText.toIntOrNull()
+    val barsOk = bars != null && bars in 1..999
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Nova partitura") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Título") }, singleLine = true)
-                Text("Instrumento", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Wrap { Instruments.CATALOG.forEachIndexed { i, ins -> FilterChip(selected = instIdx == i, onClick = { instIdx = i }, label = { Text(ins.name + if (ins.staves == 2) " (2 pautas)" else "") }) } }
-                Text("Dá para adicionar mais instrumentos depois, no Estúdio.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Stepper("Tonalidade", Names.key(fifths) + " maior", { if (fifths > -6) fifths-- }, { if (fifths < 6) fifths++ })
-                Wrap { sigs.forEachIndexed { i, (a, b) -> FilterChip(selected = ts == i, onClick = { ts = i }, label = { Text("$a/$b") }) } }
-                Stepper("Andamento (♩ por minuto)", "$tempo", { if (tempo > 40) tempo -= 5 }, { if (tempo < 200) tempo += 5 })
-                Stepper("Compassos", "$bars", { if (bars > 4) bars -= 4 }, { if (bars < 400) bars += 4 })
-                Text("Compassos a mais podem ser acrescentados enquanto você escreve.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                SectionTitle("Conjuntos prontos")
+                Wrap { Instruments.PRESETS.forEach { pr -> AssistChip(onClick = { chosen.clear(); chosen.addAll(pr.ids) }, label = { Text(pr.name) }) } }
+
+                SectionTitle("Instrumentos (toque para acrescentar; pode repetir)")
+                Wrap { Instruments.CATALOG.forEach { ins -> FilterChip(selected = chosen.contains(ins.id), onClick = { chosen.add(ins.id) }, label = { Text(ins.name + if (ins.staves == 2) " (2 pautas)" else "") }) } }
+                if (chosen.isEmpty()) Text("Escolha pelo menos um instrumento.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                else {
+                    Text("Na partitura (de cima para baixo) — toque para tirar:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Wrap { chosen.toList().forEachIndexed { i, id -> InputChip(selected = true, onClick = { chosen.removeAt(i) }, label = { Text("${i + 1}. " + (Instruments.byId(id)?.name ?: id)) }, trailingIcon = { Text("✕") }) } }
+                }
+
+                Stepper("Tonalidade", Names.key(fifths) + " maior", { if (fifths > -7) fifths-- }, { if (fifths < 7) fifths++ })
+
+                SectionTitle("Fórmula de compasso: $beats/$beatType")
+                Wrap { common.forEach { (a, b) -> FilterChip(selected = beats == a && beatType == b, onClick = { beats = a; beatType = b }, label = { Text("$a/$b") }) } }
+                Stepper("Tempos por compasso", "$beats", { if (beats > 1) beats-- }, { if (beats < 32) beats++ })
+                Wrap {
+                    Text("Valor do tempo:", modifier = Modifier.padding(end = 4.dp))
+                    listOf(2, 4, 8, 16).forEach { bt -> FilterChip(selected = beatType == bt, onClick = { beatType = bt }, label = { Text("1/$bt") }) }
+                }
+
+                Stepper("Andamento (♩ por minuto)", "$tempo", { if (tempo > 30) tempo -= 5 }, { if (tempo < 240) tempo += 5 })
+                OutlinedTextField(
+                    value = barsText, onValueChange = { v -> barsText = v.filter { it.isDigit() }.take(3) },
+                    label = { Text("Compassos") }, singleLine = true, isError = !barsOk,
+                    supportingText = { Text(if (barsOk) "Mais compassos podem ser acrescentados enquanto você escreve." else "Digite um número de 1 a 999.") },
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                )
             }
         },
         confirmButton = {
-            Button(onClick = {
-                onCreate(Edit.blankFor(title.ifBlank { "Sem título" }, fifths, sigs[ts].first, sigs[ts].second, bars, Instruments.CATALOG[instIdx], tempo))
+            Button(enabled = barsOk && chosen.isNotEmpty(), onClick = {
+                val insts = chosen.mapNotNull { Instruments.byId(it) }
+                onCreate(Edit.blankMulti(title.ifBlank { "Sem título" }, fifths, beats, beatType, bars!!, insts, tempo))
             }) { Text("Criar") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },

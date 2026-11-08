@@ -38,9 +38,11 @@ fun ConductScreen(state: AppState) {
     val p = state.player
     var beats by remember(s) { mutableIntStateOf(s?.beats ?: 4) }
     var beatType by remember(s) { mutableIntStateOf(s?.beatType ?: 4) }
-    val pattern = remember(beats, beatType) { Conducting.forMeter(beats, beatType) }
+    var opt by remember { mutableIntStateOf(0) }
+    val options = remember(beats, beatType) { Conducting.options(beats, beatType) }
+    val pattern = remember(beats, beatType, opt) { Conducting.forMeter(beats, beatType, opt) }
     var anim by remember { mutableStateOf(false) }
-    var freePhase by remember { mutableDoubleStateOf(0.0) }
+    var freeQ by remember { mutableDoubleStateOf(0.0) }
 
     // anacruse: se o primeiro compasso é incompleto, os compassos seguintes ainda começam no tempo 1
     val offsetQ = remember(s, state.rev, pattern) {
@@ -55,8 +57,8 @@ fun ConductScreen(state: AppState) {
 
     val phaseNow: () -> Double = {
         when {
-            p.active -> (p.posSec * p.usedTempo / 60.0 + (if (p.kind == "music") offsetQ else 0.0)) / pattern.beatQuarters
-            anim -> freePhase
+            p.active -> pattern.phaseAtQuarters(p.posSec * p.usedTempo / 60.0 + (if (p.kind == "music") offsetQ else 0.0))
+            anim -> pattern.phaseAtQuarters(freeQ)
             else -> -1.0
         }
     }
@@ -69,12 +71,12 @@ fun ConductScreen(state: AppState) {
             while (true) {
                 val now = withFrameNanos { it }
                 val dt = (now - last) / 1e9; last = now
-                freePhase += dt * (state.tempo / 60.0) / pattern.beatQuarters
+                freeQ += dt * (state.tempo / 60.0)
             }
         }
     }
     // metrônomo acompanha mudança de andamento ou de compasso
-    LaunchedEffect(state.tempo, pattern) { if (p.active && p.kind == "click") p.startClick(pattern.beats, 60.0 / state.tempo * pattern.beatQuarters, state.tempo) }
+    LaunchedEffect(state.tempo, pattern) { if (p.active && p.kind == "click") p.startClickLens(pattern.beatLens, 60.0 / state.tempo, state.tempo) }
 
     val clickOn = p.active && p.kind == "click"
     val musicOn = p.active && p.kind == "music"
@@ -86,7 +88,7 @@ fun ConductScreen(state: AppState) {
             Column {
                 Text("Regência", style = MaterialTheme.typography.headlineMedium)
                 Text(
-                    "${pattern.title} · ${state.tempo} bpm" + (if (pattern.sub > 1) " · ${"%.0f".format(state.tempo / pattern.beatQuarters)} gestos por minuto" else ""),
+                    "${pattern.title} · ${state.tempo} bpm" + (if (pattern.even && pattern.beatQuarters != 1.0) " · ${"%.0f".format(state.tempo / pattern.beatQuarters)} gestos por minuto" else ""),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -128,10 +130,10 @@ fun ConductScreen(state: AppState) {
             Panel {
                 Wrap {
                     Button(onClick = {
-                        if (anim) anim = false else { p.stop(); freePhase = 0.0; anim = true }
+                        if (anim) anim = false else { p.stop(); freeQ = 0.0; anim = true }
                     }) { Text(if (anim) "Parar animação" else "Ver o gesto andando") }
                     FilledTonalButton(onClick = {
-                        if (clickOn) p.stop() else { anim = false; p.startClick(pattern.beats, 60.0 / state.tempo * pattern.beatQuarters, state.tempo) }
+                        if (clickOn) p.stop() else { anim = false; p.startClickLens(pattern.beatLens, 60.0 / state.tempo, state.tempo) }
                     }) { Text(if (clickOn) "Parar metrônomo" else "Com metrônomo") }
                     if (s != null) FilledTonalButton(onClick = {
                         if (musicOn) p.stop() else { anim = false; p.stop(); state.play(null) }
@@ -142,11 +144,20 @@ fun ConductScreen(state: AppState) {
                 SectionTitle("Fórmula de compasso")
                 Wrap {
                     Conducting.METERS.forEach { (b, bt) ->
-                        FilterChip(selected = beats == b && beatType == bt, onClick = { beats = b; beatType = bt }, label = { Text("$b/$bt") })
+                        FilterChip(selected = beats == b && beatType == bt, onClick = { beats = b; beatType = bt; opt = 0 }, label = { Text("$b/$bt") })
                     }
                 }
+                Stepper("Tempos no compasso", "$beats", { if (beats > 1) { beats--; opt = 0 } }, { if (beats < 16) { beats++; opt = 0 } })
+                Wrap {
+                    Text("Valor do tempo:", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(end = 4.dp))
+                    listOf(2, 4, 8, 16).forEach { bt -> FilterChip(selected = beatType == bt, onClick = { beatType = bt; opt = 0 }, label = { Text("1/$bt") }) }
+                }
+                if (options.size > 1) {
+                    SectionTitle("Como reger o ${beats}/${beatType}")
+                    Wrap { options.forEachIndexed { i, o -> FilterChip(selected = opt == i, onClick = { opt = i }, label = { Text(o.label) }) } }
+                }
                 if (s != null && (s.beats != beats || s.beatType != beatType)) Text("A partitura aberta está em ${s.beats}/${s.beatType}. Ao reger a música, o gesto muda sozinho só se você escolher essa fórmula.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (s != null) FilledTonalButton(onClick = { beats = s.beats; beatType = s.beatType }, enabled = s.beats != beats || s.beatType != beatType) { Text("Usar o compasso da partitura (${s.beats}/${s.beatType})") }
+                if (s != null) FilledTonalButton(onClick = { beats = s.beats; beatType = s.beatType; opt = 0 }, enabled = s.beats != beats || s.beatType != beatType) { Text("Usar o compasso da partitura (${s.beats}/${s.beatType})") }
             }
 
             Panel {

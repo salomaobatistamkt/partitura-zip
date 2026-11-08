@@ -155,16 +155,22 @@ object Synth {
     }
 
     /** Um compasso de metrônomo: [beats] cliques, o primeiro mais agudo e forte. Dá para repetir em laço sem emenda. */
-    fun clickLoop(beats: Int, beatSec: Double): ShortArray {
-        val per = (beatSec * RATE).toInt().coerceAtLeast(1)
-        val out = ShortArray(per * beats.coerceAtLeast(1))
-        for (b in 0 until beats.coerceAtLeast(1)) {
+    fun clickLoop(beats: Int, beatSec: Double): ShortArray = clickLoopLens(List(beats.coerceAtLeast(1)) { 1.0 }, beatSec)
+
+    /** Metrônomo com gestos de durações diferentes ([lens] em semínimas); o primeiro clique é o acento. */
+    fun clickLoopLens(lens: List<Double>, quarterSec: Double): ShortArray {
+        val starts = ArrayList<Int>(); var acc = 0.0
+        for (l in lens) { starts += Math.round(acc * quarterSec * RATE).toInt(); acc += l }
+        val total = Math.round(acc * quarterSec * RATE).toInt().coerceAtLeast(1)
+        val out = ShortArray(total)
+        for ((b, st) in starts.withIndex()) {
             val f = if (b == 0) 1850.0 else 1250.0
             val a = if (b == 0) 0.9 else 0.6
-            val n = minOf(per, (0.045 * RATE).toInt())
+            val end = if (b + 1 < starts.size) starts[b + 1] else total
+            val n = minOf(end - st, (0.045 * RATE).toInt())
             for (i in 0 until n) {
                 val t = i.toDouble() / RATE
-                out[b * per + i] = (sin(2 * PI * f * t) * exp(-t * 140.0) * a * 28000).toInt().toShort()
+                out[st + i] = (sin(2 * PI * f * t) * exp(-t * 140.0) * a * 28000).toInt().toShort()
             }
         }
         return out

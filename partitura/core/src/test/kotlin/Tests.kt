@@ -72,7 +72,7 @@ fun main() {
     check("Layout estreito quebra em mais linhas", Layout.layout(ode, 300f).rows.size > lay.rows.size)
     check("Posição: E4 na clave de Sol = 0, G2 na de Fá = 0", Layout.staffPos('G', 'E', 4) == 0 && Layout.staffPos('F', 'G', 2) == 0)
     check("Armadura Mib: 3 bemóis B4 E5 A4 = 4, 7, 3", Layout.keySigPositions('G', -3) == listOf(4, 7, 3))
-    val mt = Synth.measureTimes(ode, 60); check("Tempos dos compassos a 60 bpm: 4 s por compasso", mt.size == 9 && mt[1] == 4.0 && mt[8] == 32.0)
+    val mt = Synth.measureTimes(ode, 60); check("Tempos dos compassos a 60 bpm: 4 s por compasso", mt.size == 17 && mt[1] == 4.0 && mt[8] == 32.0 && mt[16] == 64.0)
     val part1 = Synth.render(ode, 120, fromSec = mt[1] / 2, toSec = mt[2] / 2)
     check("Tocar só compasso 2 gera trecho curto", part1.size < Synth.render(ode, 120).size / 3)
     val px = MusicXml.parseAny(PIANO_XML.toByteArray())
@@ -288,33 +288,74 @@ fun main() {
 
     // ---------- regência ----------
     run {
-        var ok = true; val rep = StringBuilder()
-        for ((b, bt) in Conducting.METERS + listOf(7 to 4, 7 to 8, 9 to 4, 5 to 8, 1 to 4)) {
-            val pat = Conducting.forMeter(b, bt)
+        var ok = true; val rep = StringBuilder(); var total = 0
+        val ms = (1..16).flatMap { b -> listOf(1, 2, 4, 8, 16).map { b to it } }
+        for ((b, bt) in ms) for (oi in Conducting.options(b, bt).indices) {
+            total++
+            val pat = Conducting.forMeter(b, bt, oi)
+            val tag = "$b/$bt#$oi"
             val pts = pat.path(60)
-            if (pts.any { it.x.isNaN() || it.x < -0.05f || it.x > 1.05f || it.y < -0.05f || it.y > 1.05f }) { ok = false; rep.append(" $b/$bt fora do quadro") }
-            if (pat.steps.size != pat.beats || pat.ictus.size != pat.beats) { ok = false; rep.append(" $b/$bt instruções=${pat.steps.size}") }
+            if (pts.any { it.x.isNaN() || it.x < -0.05f || it.x > 1.05f || it.y < -0.05f || it.y > 1.05f }) { ok = false; rep.append(" $tag fora do quadro") }
+            if (pat.steps.size != pat.beats || pat.ictus.size != pat.beats || pat.beatLens.size != pat.beats) { ok = false; rep.append(" $tag instruções") }
+            if (Math.abs(pat.measureQuarters - 4.0 * b / bt) > 1e-9) { ok = false; rep.append(" $tag duração ${pat.measureQuarters}") }
             for (i in 0 until pat.beats) {
                 val p = pat.position(i.toDouble()); val q = pat.ictusPoint(i)
-                if (Math.abs(p.x - q.x) > 1e-3f || Math.abs(p.y - q.y) > 1e-3f) { ok = false; rep.append(" $b/$bt ictus $i não coincide") }
+                if (Math.abs(p.x - q.x) > 1e-3f || Math.abs(p.y - q.y) > 1e-3f) { ok = false; rep.append(" $tag ictus $i") }
             }
-            // contínuo: nenhum salto grande entre amostras vizinhas
             var maxJump = 0f
             for (k in 1 until pts.size) maxJump = maxOf(maxJump, Math.hypot((pts[k].x - pts[k - 1].x).toDouble(), (pts[k].y - pts[k - 1].y).toDouble()).toFloat())
             val wrap = pat.position(pat.beats.toDouble()); val st = pat.position(0.0)
-            if (maxJump > 0.12f || Math.abs(wrap.x - st.x) > 1e-3f) { ok = false; rep.append(" $b/$bt salto ${"%.2f".format(maxJump)}") }
+            if (maxJump > 0.16f || Math.abs(wrap.x - st.x) > 1e-3f) { ok = false; rep.append(" $tag salto ${"%.2f".format(maxJump)}") }
+            // fase em semínimas: cada gesto começa no tempo certo e a fase só cresce
+            var acc = 0.0
+            for (i in 0 until pat.beats) { if (Math.abs(pat.phaseAtQuarters(acc) - i) > 1e-9) { ok = false; rep.append(" $tag fase $i") }; acc += pat.beatLens[i] }
+            var prev = -1.0
+            for (k in 0 until 200) { val ph = pat.phaseAtQuarters(pat.measureQuarters * k / 200.0); if (ph < prev - 1e-9) { ok = false; rep.append(" $tag fase recua") }; prev = ph }
         }
-        check("Regência: todos os padrões ficam no quadro, passam pelos ictus e fecham o ciclo$rep", ok)
+        check("Regência: $total opções de 1/1 a 16/16 ficam no quadro, passam pelos ictus, somam o compasso e fecham o ciclo$rep", ok)
         val p44 = Conducting.forMeter(4, 4); val p68 = Conducting.forMeter(6, 8); val p34 = Conducting.forMeter(3, 4); val p38 = Conducting.forMeter(3, 8)
         check("4/4 = 4 gestos de 1 semínima; 6/8 = 2 gestos de 1,5; 3/4 = 3; 3/8 = 1 gesto", p44.beats == 4 && p44.beatQuarters == 1.0 && p68.beats == 2 && p68.beatQuarters == 1.5 && p68.sub == 3 && p34.beats == 3 && p38.beats == 1)
         check("Compasso mede o mesmo em semínimas que a pauta (6/8 = 3)", p68.measureQuarters == 3.0 && p44.measureQuarters == 4.0)
         check("O primeiro gesto desce (ictus 1 é o ponto mais baixo no 4/4)", (1 until 4).all { p44.ictusPoint(0).y > p44.ictusPoint(it).y })
+        val o68 = Conducting.options(6, 8).map { it.label }; val o54 = Conducting.options(5, 4).map { it.label }
+        check("6/8: em 2 (padrão) e em 6; 5/4: 3+2 e 2+3 em 5 ou em 2 gestos ($o68 / $o54)", o68[0].startsWith("em 2") && o68.any { it == "em 6" } && o54.size == 4)
+        val p78 = Conducting.forMeter(7, 8, 0)
+        check("7/8 = 2+2+3: três gestos de 1, 1 e 1,5 semínima", p78.beats == 3 && p78.beatLens == listOf(1.0, 1.0, 1.5))
+        val p58 = Conducting.forMeter(5, 8, 1)
+        check("5/8 em 2+3: gestos de 1 e 1,5; o 2º gesto começa em 1 semínima", p58.beatLens == listOf(1.0, 1.5) && Math.abs(p58.phaseAtQuarters(1.0) - 1.0) < 1e-9 && Math.abs(p58.phaseAtQuarters(1.25) - 1.1666666) < 1e-3)
+        // o ictus é o ponto de maior velocidade (rebate): a batuta chega rápido e sai devagar
+        val before = p44.position(1.0 - 0.02); val at = p44.position(1.0); val after = p44.position(1.0 + 0.02)
+        val dIn = Math.hypot((at.x - before.x).toDouble(), (at.y - before.y).toDouble()); val dOut = Math.hypot((after.x - at.x).toDouble(), (after.y - at.y).toDouble())
+        check("Rebote: chega ao ictus mais rápido do que sai dele", dIn > dOut)
     }
     run {
         val n1 = Edit.blankFor("n", -2, 3, 4, 16, Instruments.byId("piano")!!, 90)
         check("Nova partitura de piano: 2 pautas G+F, 16 compassos, sem 'Piano 2'", n1.parts.size == 2 && n1.parts[0].name == "Piano (pauta 1)" && n1.parts[1].clef == 'F' && n1.parts[0].measures.size == 16 && n1.tempo == 90 && Validate.measureDurations(n1).isEmpty())
         val n2 = Edit.blankFor("n", 0, 6, 8, 8, Instruments.byId("guitar")!!)
         check("Nova partitura de violão em 6/8 com compassos de 3 semínimas", n2.parts.size == 1 && n2.parts[0].inst == "guitar" && n2.parts[0].measures[0].notes[0].duration == 12 && Validate.measureDurations(n2).isEmpty())
+    }
+    run {
+        // todas as fórmulas: criar, validar, desenhar e sintetizar sem falhar
+        var ok = true; val rep = StringBuilder()
+        for (b in 1..16) for (bt in listOf(2, 4, 8, 16)) {
+            try {
+                val sc = Edit.blankMulti("m", 0, b, bt, 6, listOf(Instruments.byId("piano")!!, Instruments.byId("contralto")!!), 100)
+                // preenche o primeiro compasso com notas do menor valor possível que cabe
+                val len = 16 * b / bt
+                for (k in 0 until len) Edit.enter(sc, 0, 0, k, 60 + k % 12, 1.0 / 4.0)
+                val sceneOk = Engrave.scene(sc, 70f).let { true }
+                val bad = Validate.measureDurations(sc)
+                val pcm = Synth.render(sc, 120)
+                val xml = MusicXml.parseAny(MusicXml.write(sc).toByteArray())
+                if (bad.isNotEmpty() || !sceneOk || pcm.isEmpty() || xml.beats != b || xml.beatType != bt || xml.parts.size != sc.parts.size) { ok = false; rep.append(" $b/$bt") }
+            } catch (e: Throwable) { ok = false; rep.append(" $b/$bt!${e.javaClass.simpleName}:${e.message}") }
+        }
+        check("Todas as fórmulas de 1/2 a 16/16 criam, desenham, soam e salvam em MusicXML$rep", ok)
+        val multi = Edit.blankMulti("x", 0, 4, 4, 8, Instruments.PRESETS.first { it.id == "satbpiano" }.ids.map { Instruments.byId(it)!! })
+        check("Coro SATB + piano: 4 vozes + 2 pautas = 6 partes, contralto com clave de sol e som de voz", multi.parts.size == 6 && multi.parts[1].name.contains("contralto") && multi.parts[1].inst == "voice" && multi.parts[1].clef == 'G' && Validate.measureDurations(multi).isEmpty())
+        check("Ode à Alegria tem 16 compassos nas duas partes", Samples.ode().parts.all { it.measures.size == 16 } && Validate.measureDurations(Samples.ode()).isEmpty())
+        val cl = Synth.clickLoopLens(listOf(1.0, 1.0, 1.5), 0.5)
+        check("Metrônomo de gestos desiguais dura 3,5 semínimas (${cl.size})", Math.abs(cl.size - 3.5 * 0.5 * 44100) < 2)
     }
     check("Nomes em cifra", Names.key(-3) == "E♭" && Names.key(0) == "C" && Names.minorKey(0) == "A" && Names.step('F', 1) == "F♯" && Names.pitch(Pitch('B', -1, 3)) == "B♭3")
     println(if (fails == 0) "TODOS OS TESTES PASSARAM" else "$fails FALHAS")

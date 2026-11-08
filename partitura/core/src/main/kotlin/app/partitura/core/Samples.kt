@@ -26,8 +26,8 @@ object Samples {
     fun all(): List<Score> = listOf(ode(), escalaMib(), arpejoSolMenor())
 
     fun ode(): Score = Score("Ode à Alegria (exemplo)", 4, 0, 4, 4, 100).also {
-        it.parts += part("P1", "Melodia", 'G', "E4:1 E4:1 F4:1 G4:1|G4:1 F4:1 E4:1 D4:1|C4:1 C4:1 D4:1 E4:1|E4:1.5 D4:0.5 D4:2|E4:1 E4:1 F4:1 G4:1|G4:1 F4:1 E4:1 D4:1|C4:1 C4:1 D4:1 E4:1|D4:1.5 C4:0.5 C4:2")
-        it.parts += part("P2", "Acompanhamento", 'F', "C3:4|G2:4|C3:4|G2:2 C3:2|C3:4|G2:4|C3:4|G2:2 C3:2")
+        it.parts += part("P1", "Melodia", 'G', "E4:1 E4:1 F4:1 G4:1|G4:1 F4:1 E4:1 D4:1|C4:1 C4:1 D4:1 E4:1|E4:1.5 D4:0.5 D4:2|E4:1 E4:1 F4:1 G4:1|G4:1 F4:1 E4:1 D4:1|C4:1 C4:1 D4:1 E4:1|D4:1.5 C4:0.5 C4:2|D4:1 D4:1 E4:1 C4:1|D4:1 E4:0.5 F4:0.5 E4:1 C4:1|D4:1 E4:0.5 F4:0.5 E4:1 D4:1|C4:1 D4:1 G3:2|E4:1 E4:1 F4:1 G4:1|G4:1 F4:1 E4:1 D4:1|C4:1 C4:1 D4:1 E4:1|D4:1.5 C4:0.5 C4:2")
+        it.parts += part("P2", "Acompanhamento", 'F', "C3:4|G2:4|C3:4|G2:2 C3:2|C3:4|G2:4|C3:4|G2:2 C3:2|G2:4|C3:4|G2:4|C3:2 G2:2|C3:4|G2:4|C3:4|G2:2 C3:2")
     }
 
     fun escalaMib(): Score = Score("Escala de Mib maior (exemplo)", 4, -3, 4, 4, 90).also {

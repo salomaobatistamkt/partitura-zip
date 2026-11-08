@@ -55,8 +55,26 @@ object Instruments {
         Instrument("trumpet", "Trompete", 'G', Timbre.BRASS, 56, note = "altura real (concerto)"),
         Instrument("trombone", "Trombone", 'F', Timbre.BRASS, 57),
         Instrument("soprano", "Voz (soprano)", 'G', Timbre.VOICE, 54),
-        Instrument("tenor", "Voz (tenor)", 'G', Timbre.VOICE, 54),
+        Instrument("contralto", "Voz (contralto)", 'G', Timbre.VOICE, 54, note = "região grave da voz feminina"),
+        Instrument("tenor", "Voz (tenor)", 'G', Timbre.VOICE, 54, note = "escrito na altura real"),
         Instrument("bassvoice", "Voz (baixo)", 'F', Timbre.VOICE, 54),
+        Instrument("oboe", "Oboé", 'G', Timbre.REED, 68),
+        Instrument("altosax", "Sax alto", 'G', Timbre.REED, 65, note = "altura real (concerto)"),
+        Instrument("tenorsax", "Sax tenor", 'G', Timbre.REED, 66, note = "altura real (concerto)"),
+        Instrument("horn", "Trompa", 'G', Timbre.BRASS, 60, note = "altura real (concerto)"),
+        Instrument("tuba", "Tuba", 'F', Timbre.BRASS, 58),
+        Instrument("ukulele", "Ukulele", 'G', Timbre.GUITAR, 24, note = "altura real"),
+        Instrument("cavaco", "Cavaquinho", 'G', Timbre.GUITAR, 24, note = "altura real"),
+    )
+
+    /** Conjuntos prontos para a criação de uma partitura. */
+    class Preset(val id: String, val name: String, val ids: List<String>)
+    val PRESETS = listOf(
+        Preset("satb", "Coro SATB", listOf("soprano", "contralto", "tenor", "bassvoice")),
+        Preset("satbpiano", "Coro + piano", listOf("soprano", "contralto", "tenor", "bassvoice", "piano")),
+        Preset("voicepiano", "Voz + piano", listOf("soprano", "piano")),
+        Preset("voiceguitar", "Voz + violão", listOf("soprano", "guitar")),
+        Preset("strings", "Cordas (2 violinos, violoncelo)", listOf("violin", "violin", "cello")),
     )
 
     private val GM = mapOf("piano" to 0, "guitar" to 24, "bass" to 33, "organ" to 19, "strings" to 40, "flute" to 73, "reed" to 71, "brass" to 56, "voice" to 54)

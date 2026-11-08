@@ -217,6 +217,15 @@ object Edit {
         return s
     }
 
+    /** Partitura nova com vários instrumentos de uma vez (na ordem dada). */
+    fun blankMulti(title: String, fifths: Int, beats: Int, beatType: Int, measures: Int, insts: List<Instrument>, tempo: Int = 100): Score {
+        val s = Score(title, 4, fifths, beats, beatType, tempo)
+        val len = 4 * 4 * beats / beatType
+        val lens = List(measures.coerceAtLeast(1)) { len }
+        for (i in insts.ifEmpty { listOf(Instruments.CATALOG[0]) }) addInstrument(s, i, lens)
+        return s
+    }
+
     fun blank(title: String, fifths: Int, beats: Int, beatType: Int, measures: Int, tempo: Int = 100): Score {
         val s = Score(title, 4, fifths, beats, beatType, tempo)
         val len = 4 * 4 * beats / beatType

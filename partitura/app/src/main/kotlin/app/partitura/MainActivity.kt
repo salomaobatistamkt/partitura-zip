@@ -90,7 +90,8 @@ fun Root(state: AppState) {
         }
         if (wide) {
             Row(Modifier.fillMaxSize()) {
-                Sidebar(state, tab, full) { tab = it }
+                val mode = if (state.sideMode < 0) (if (full) 0 else 1) else state.sideMode
+                Sidebar(state, tab, mode) { tab = it }
                 Scaffold(modifier = Modifier.weight(1f), snackbarHost = { SnackbarHost(snack) }, containerColor = MaterialTheme.colorScheme.background) { pad -> Box(Modifier.padding(pad).fillMaxSize()) { content() } }
             }
         } else {
@@ -148,10 +149,18 @@ private fun MoreScreen(go: (Int) -> Unit) {
     }
 }
 
-/** Menu lateral: marca, seções coloridas e um cartão "Agora" com a partitura aberta e o play. */
+/** Menu lateral: marca, seções coloridas e um cartão "Agora" com a partitura aberta e o play. Pode ser recolhido ou escondido. */
 @Composable
-private fun Sidebar(state: AppState, tab: Int, full: Boolean, go: (Int) -> Unit) {
+private fun Sidebar(state: AppState, tab: Int, mode: Int, go: (Int) -> Unit) {
     val cs = MaterialTheme.colorScheme
+    if (mode == 2) {
+        // escondido: só uma faixa fina com o botão de voltar
+        Box(Modifier.width(30.dp).fillMaxHeight().background(cs.surface).clickable { state.applySide(1) }, contentAlignment = Alignment.TopCenter) {
+            Text("›", style = MaterialTheme.typography.headlineMedium, color = cs.primary, modifier = Modifier.padding(top = 10.dp))
+        }
+        return
+    }
+    val full = mode == 0
     Column(Modifier.width(if (full) 248.dp else 96.dp).fillMaxHeight().background(cs.surface).padding(horizontal = if (full) 12.dp else 8.dp, vertical = 14.dp)) {
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()),
@@ -176,6 +185,16 @@ private fun Sidebar(state: AppState, tab: Int, full: Boolean, go: (Int) -> Unit)
             }
         }
         if (full) { Spacer(Modifier.height(10.dp)); NowCard(state, go) }
+        Spacer(Modifier.height(6.dp))
+        // minimizar / expandir
+        if (full) {
+            TextButton(onClick = { state.applySide(1) }, modifier = Modifier.fillMaxWidth()) { Text("‹  Recolher menu") }
+        } else {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                TextButton(onClick = { state.applySide(0) }, contentPadding = PaddingValues(4.dp)) { Text("abrir ›", style = MaterialTheme.typography.labelSmall) }
+                TextButton(onClick = { state.applySide(2) }, contentPadding = PaddingValues(4.dp)) { Text("‹ ocultar", style = MaterialTheme.typography.labelSmall) }
+            }
+        }
     }
 }
 
