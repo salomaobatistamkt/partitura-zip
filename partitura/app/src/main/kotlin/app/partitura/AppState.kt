@@ -133,8 +133,8 @@ class AppState(private val app: Context) {
     var openPicker: () -> Unit = {}
     var saveAs: (String, ByteArray) -> Unit = { _, _ -> }
 
-    fun setDark(v: Boolean) { dark = v; prefs.edit().putBoolean("dark", v).apply() }
-    fun setOmrUrl(v: String) { omrUrl = v.trim(); prefs.edit().putString("omr_url", omrUrl).apply() }
+    fun applyDark(v: Boolean) { dark = v; prefs.edit().putBoolean("dark", v).apply() }
+    fun applyOmrUrl(v: String) { omrUrl = v.trim(); prefs.edit().putString("omr_url", omrUrl).apply() }
 
     private val undo = ArrayDeque<Score>()
     private val redo = ArrayDeque<Score>()

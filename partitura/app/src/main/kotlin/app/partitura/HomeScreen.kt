@@ -120,13 +120,13 @@ private fun NewDialog(onDismiss: () -> Unit, onCreate: (Score) -> Unit) {
 private fun SettingsDialog(state: AppState, onClose: () -> Unit) {
     var url by remember { mutableStateOf(state.omrUrl) }
     AlertDialog(
-        onDismissRequest = { state.setOmrUrl(url); onClose() },
+        onDismissRequest = { state.applyOmrUrl(url); onClose() },
         title = { Text("Ajustes") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Tema escuro", Modifier.weight(1f))
-                    Switch(checked = state.dark, onCheckedChange = { state.setDark(it) })
+                    Switch(checked = state.dark, onCheckedChange = { state.applyDark(it) })
                 }
                 OutlinedTextField(
                     value = url, onValueChange = { url = it }, label = { Text("Servidor de leitura de PDF/foto (OMR)") },
@@ -145,6 +145,6 @@ private fun SettingsDialog(state: AppState, onClose: () -> Unit) {
                 Text("Fonte de notação: Bravura (SIL Open Font License).", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
-        confirmButton = { Button(onClick = { state.setOmrUrl(url); onClose() }) { Text("Pronto") } },
+        confirmButton = { Button(onClick = { state.applyOmrUrl(url); onClose() }) { Text("Pronto") } },
     )
 }
