@@ -89,13 +89,14 @@ private fun PianoStudy(state: AppState, wide: Boolean) {
                 Text("$tn ${scaleType.label.lowercase()}", style = MaterialTheme.typography.titleMedium)
                 Text(notes.joinToString(" – ") { Names.step(it.step, it.alter) } + "   (" + notes.dropLast(1).joinToString(", ") { Study.ptShort(it.step, it.alter) } + ")")
                 Collapsible("Tons, semitons e dedilhado") {
+                    Collapsible("Tons, semitons e dedilhado", "Fórmula da escala e dedos") {
                     val steps = scaleType.intervals.let { iv -> (iv + 12).zipWithNext { a, b -> if (b - a == 2) "T" else if (b - a == 1) "S" else "${(b - a)}" } }
                     Text("Tons e semitons: " + steps.joinToString(" "), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     val fing = if (scaleType == ScaleType.MAIOR) Study.fingering(tn, false) else if (scaleType == ScaleType.MENOR_NATURAL) Study.fingering(tn, true) else null
                     if (fing != null) {
                         Text("Mão direita (subindo): " + fing.first.joinToString(" "), color = Color(Roles.ARGB[1]))
                         Text("Mão esquerda (subindo): " + fing.second.joinToString(" "), color = Color(Roles.ARGB[2]))
-                    } else Text("Dedilhado: o app só mostra o que tem certeza (maiores C G D A E F; menores naturais Lá, Mi, Ré). Para esta escala, siga seu professor ou método.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else Text("Digitação: o app só mostra a que tem certeza (maiores C G D A E F e menores naturais Lá, Mi, Ré). Nesta escala, use a indicação do seu professor ou método.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 StaticScore(sc, 0, 190.dp, q = if (playing === sc) qNow else null)
                 Wrap {
@@ -117,12 +118,12 @@ private fun PianoStudy(state: AppState, wide: Boolean) {
             Panel {
                 Text(Study.chordName(rn, type) + "  ·  " + type.name, style = MaterialTheme.typography.titleMedium)
                 Text("Notas: " + chord.joinToString(" – ") { Names.step(it.step, it.alter) } + "   (fórmula " + type.tones + ")")
-                Text(chord.joinToString(", ") { Study.ptShort(it.step, it.alter) }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 Wrap { invs.forEachIndexed { i, _ -> FilterChip(selected = invIdx == i, onClick = { invIdx = i }, label = { Text(if (i == 0) "Posição fundamental" else "${i}ª inversão") }) } }
                 Collapsible("Mãos e dedos") {
                     val fingers = Study.chordFingers(inv.size)
                     Text("Direita (roxo): " + inv.joinToString(" ") { Names.step(it.step, it.alter) } + (fingers?.let { "  ·  dedos " + it.first.joinToString("-") } ?: ""), color = Color(Roles.ARGB[1]))
                     Text("Esquerda (vermelho): ${Names.step(bassRoot.step, bassRoot.alter)} (fundamental, uma oitava abaixo)" + (fingers?.let { "  ·  dedo 5" } ?: ""), color = Color(Roles.ARGB[2]))
+                }
                 }
                 val sc = remember(rootIdx, chordIdx, invIdx) { Theory.toScore(Study.chordName(rn, type), inv, 4.0, 0, chord = true) }
                 StaticScore(sc, 0, 160.dp, q = if (playing === sc) qNow else null)

@@ -137,6 +137,7 @@ private fun LessonView(state: AppState, l: Lesson, wide: Boolean, onBack: () -> 
         val e = state.progress.map[l.id]
         state.progressRev
         if (e != null) Text("Melhor: ${e.bestHit}% · melhor andamento limpo: ${e.bestBpm} bpm · ${e.attempts} tentativa(s)" + if (e.done) " · concluído" else "", style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
 

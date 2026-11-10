@@ -8,6 +8,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +45,18 @@ fun PianoKeyboard(first: Int, last: Int, active: Set<Int>, marks: Set<Int>, onKe
     val scope = rememberCoroutineScope()
     val flash = remember { Animatable(0f) }
     var flashKey by remember { mutableStateOf(-1) }
+    var pressed by remember { mutableStateOf(-1) }
+    // brilho que apaga aos poucos quando a nota para de soar (em vez de sumir de uma vez)
+    val glow = remember { mutableStateMapOf<Int, Float>() }
+    LaunchedEffect(active) {
+        active.forEach { glow[it] = 1f }
+        while (true) {
+            var any = false
+            for (k in glow.keys.toList()) if (k !in active) { val v = (glow[k] ?: 0f) - 0.07f; if (v <= 0f) glow.remove(k) else { glow[k] = v; any = true } }
+            if (!any) break
+            withFrameNanos { }
+        }
+    }
     Canvas(
         modifier.fillMaxWidth().height(height).pointerInput(first, last) {
             detectTapGestures(onPress = { off ->
@@ -56,9 +72,10 @@ fun PianoKeyboard(first: Int, last: Int, active: Set<Int>, marks: Set<Int>, onKe
                 }
                 val key = black ?: whites[(off.x / kw).toInt().coerceIn(0, whites.size - 1)]
                 onKey(key)
-                flashKey = key
+                flashKey = key; pressed = key
                 scope.launch { flash.snapTo(1f); flash.animateTo(0f, tween(420)) }
                 tryAwaitRelease()
+                pressed = -1
             })
         },
     ) {
@@ -68,10 +85,15 @@ fun PianoKeyboard(first: Int, last: Int, active: Set<Int>, marks: Set<Int>, onKe
         val fl = flash.value
         whites.forEachIndexed { i, m ->
             val lit = m in active
-            val base = when { lit -> roleColor(roles[m], m in attack); m in marks -> Color(0xFFFBE3B0); else -> Color(0xFFF7F4EC) }
+            val g = if (lit) 1f else (glow[m] ?: 0f)
+            val idle = if (m in marks) Color(0xFFFBE3B0) else Color(0xFFF7F4EC)
+            val base = if (g > 0f) lerp(idle, roleColor(roles[m], m in attack), g) else idle
+            val dep = if (pressed == m) 3f else 0f   // tecla apertada afunda um pouco
             val x = i * kw + 0.8f; val w = kw - 1.6f
-            // corpo da tecla com leve degradê (mais escuro embaixo) e cantos de baixo arredondados
-            drawRoundRect(Brush.verticalGradient(listOf(base, if (lit || m in marks) base else Color(0xFFE4DFD0)), 0f, size.height), Offset(x, -round.y), Size(w, size.height + round.y), round)
+            // corpo da tecla com degradê (mais escuro embaixo), brilho no topo, borda fina e sombra na base
+            drawRoundRect(Brush.verticalGradient(listOf(base, if (g > 0f || m in marks) base else Color(0xFFE0DACB)), 0f, size.height), Offset(x, -round.y + dep), Size(w, size.height + round.y - dep), round)
+            drawRoundRect(Color(0x26000000), Offset(x, -round.y + dep), Size(w, size.height + round.y - dep), round, style = androidx.compose.ui.graphics.drawscope.Stroke(1.2f))
+            drawRect(Color(0x33000000), Offset(x + 1f, size.height - 5f), Size(w - 2f, 4f))
             if (flashKey == m && fl > 0f) drawRoundRect(Color(Roles.ARGB[0]).copy(alpha = 0.55f * fl), Offset(x, -round.y), Size(w, size.height + round.y), round)
             if (m % 12 == 0) drawIntoCanvas { it.nativeCanvas.drawText("C${m / 12 - 1}", i * kw + kw / 2, size.height - 6f, labelPaint) }
         }
@@ -82,9 +104,13 @@ fun PianoKeyboard(first: Int, last: Int, active: Set<Int>, marks: Set<Int>, onKe
             if (wi < 0) continue
             val cx = wi * kw
             val lit = m in active
-            val color = when { lit -> roleColor(roles[m], m in attack); m in marks -> Color(0xFF8A6A2A); else -> Color(0xFF1C1C22) }
-            val bh = size.height * 0.62f
-            drawRoundRect(Brush.verticalGradient(listOf(if (lit || m in marks) color else Color(0xFF34343C), color), 0f, bh), Offset(cx - bw / 2, -round.y), Size(bw, bh + round.y), CornerRadius(bw * 0.18f, bw * 0.18f))
+            val g = if (lit) 1f else (glow[m] ?: 0f)
+            val idle = if (m in marks) Color(0xFF8A6A2A) else Color(0xFF1C1C22)
+            val color = if (g > 0f) lerp(idle, roleColor(roles[m], m in attack), g) else idle
+            val dep = if (pressed == m) 3f else 0f
+            val bh = size.height * 0.62f - dep
+            drawRoundRect(Brush.verticalGradient(listOf(if (g > 0f || m in marks) color else Color(0xFF3A3A44), color), 0f, bh), Offset(cx - bw / 2, -round.y + dep), Size(bw, bh + round.y), CornerRadius(bw * 0.18f, bw * 0.18f))
+            if (g == 0f && m !in marks) drawRoundRect(Color(0x22FFFFFF), Offset(cx - bw / 2 + bw * 0.14f, dep), Size(bw * 0.22f, bh * 0.82f), CornerRadius(bw * 0.08f, bw * 0.08f))
             if (flashKey == m && fl > 0f) drawRoundRect(Color(Roles.ARGB[0]).copy(alpha = 0.6f * fl), Offset(cx - bw / 2, -round.y), Size(bw, bh + round.y), CornerRadius(bw * 0.18f, bw * 0.18f))
         }
     }
