@@ -55,9 +55,11 @@ data class Measure(
     var repeatStart: Boolean = false, var repeatEnd: Boolean = false, var volta: Int = 0, var rit: Int = 0, var clef: Char? = null,
     /** "fermata" quando há fermata no compasso (a última nota soa mais longa). */
     var mark: String? = null,
+    /** Motivo pelo qual a leitura deste compasso é incerta (soma de tempos não fecha); null = sem dúvida. */
+    var doubt: String? = null,
 ) {
     /** Cópia independente (listas novas) mantendo todos os campos opcionais. */
-    fun dup(): Measure = Measure(number, notes.toMutableList(), harmony.toMutableList(), dyn.toMutableList(), tempo, fifths, beats, beatType, repeatStart, repeatEnd, volta, rit, clef, mark)
+    fun dup(): Measure = Measure(number, notes.toMutableList(), harmony.toMutableList(), dyn.toMutableList(), tempo, fifths, beats, beatType, repeatStart, repeatEnd, volta, rit, clef, mark, doubt)
 }
 
 data class Part(val id: String, val name: String, val measures: MutableList<Measure> = mutableListOf(), var clef: Char = 'G', val group: String = id, var inst: String = "piano")

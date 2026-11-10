@@ -179,6 +179,10 @@ class AppState(private val app: Context) {
     private val prefs = app.getSharedPreferences("partitura", Context.MODE_PRIVATE)
     var score by mutableStateOf<Score?>(null)
     var rev by mutableIntStateOf(0)
+    /** Progresso do aluno nos exercícios (salvo em progress.tsv, só neste aparelho). */
+    val progress: Progress by lazy { Progress.parse(runCatching { File(app.filesDir, "progress.tsv").readText() }.getOrDefault("")) }
+    var progressRev by mutableIntStateOf(0)
+    fun saveProgress() { runCatching { File(app.filesDir, "progress.tsv").writeText(progress.serialize()) }; progressRev++ }
     var selP by mutableIntStateOf(0)
     var selM by mutableIntStateOf(0)
     var selN by mutableIntStateOf(0)

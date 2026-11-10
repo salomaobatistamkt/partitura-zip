@@ -205,7 +205,12 @@ fun StudioScreen(state: AppState, wide: Boolean, goHome: () -> Unit) {
 @Composable
 private fun pianoActive(state: AppState, p: Player): Map<Int, Int> {
     val s = state.score ?: return emptyMap()
-    val rev = state.rev
+    return pianoActiveFor(s, state.rev, p)
+}
+
+/** Teclas acesas (midi → papel*2+ataque) no instante atual do [p], para qualquer partitura. */
+@Composable
+internal fun pianoActiveFor(s: Score, rev: Int, p: Player): Map<Int, Int> {
     val ev = remember(s, rev, p.usedTempo) { Synth.events(s, p.usedTempo).sortedBy { it.startSec } }
     val roles = remember(ev) { Roles.forEvents(s, ev) }
     val maxDur = remember(ev) { ev.maxOfOrNull { it.durSec } ?: 0.0 }

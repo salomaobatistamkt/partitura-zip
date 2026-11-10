@@ -767,8 +767,8 @@ object Omr {
                     }
                     total += d
                 }
-                if (total < barLen && !(mi == 0 && total > 0)) { padRests(m, barLen - total); if (mi != nMeas - 1 || clipped) adjusted++ }
-                else if (clipped) adjusted++
+                if (total < barLen && !(mi == 0 && total > 0)) { padRests(m, barLen - total); if (mi != nMeas - 1 || clipped) { adjusted++; m.doubt = "ritmo não fechou; completado com pausa" } }
+                else if (clipped) { adjusted++; m.doubt = "ritmo passou do compasso; foi cortado" }
                 part.measures += m
             }
             score.parts += part

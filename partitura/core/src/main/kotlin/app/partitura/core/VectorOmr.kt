@@ -701,7 +701,7 @@ object VectorOmr {
 
     // ----------------------------------------------------------------- montagem da partitura
     private class RawNote(val pitch: Pitch?, val dur: Int, val voice: Int, val chord: Boolean, val tieStart: Boolean, val tieStop: Boolean, val lyric: String?, val syl: Char) { var mr = false }
-    private class Acc { val notes = ArrayList<RawNote>(); val harm = ArrayList<Pair<Int, Harmony0>>(); val dyn = ArrayList<Pair<Int, String>>(); var clef: Char? = null }
+    private class Acc { val notes = ArrayList<RawNote>(); val harm = ArrayList<Pair<Int, Harmony0>>(); val dyn = ArrayList<Pair<Int, String>>(); var clef: Char? = null; var doubt: String? = null }
     private class MeasInfo { var fifths = 0; var beats = 4; var beatType = 4; var barLen = 96; var len = 96; var tempo: Int? = null; var rit = 0
         var repStart = false; var repEnd = false; var volta = 0; var ferm = false }
     private class BM(val voices: List<Pair<Int, ArrayList<RawNote>>>, val sums: List<Int>) {
@@ -838,8 +838,8 @@ object VectorOmr {
                                 if (nn.mr) acc.notes += RawNote(null, inf.len, vid, false, false, false, null, 's') else acc.notes += nn
                             }
                             if (list.size == 1 && list[0].mr) sum = inf.len
-                            if (sum < inf.len) acc.notes += RawNote(null, inf.len - sum, vid, false, false, false, null, 's')
-                            else if (sum > inf.len + 1) { adjusted++; if (dbg) System.err.println("BADSUM sys$si bar$mi slot$k v$vid sum=$sum len=${inf.len}") }
+                            if (sum < inf.len) { acc.notes += RawNote(null, inf.len - sum, vid, false, false, false, null, 's'); if (sum > 0 && !(list.size == 1 && list[0].mr)) acc.doubt = "faltam ${inf.len - sum} divisão(ões) para fechar o compasso; foi completado com pausa" }
+                            else if (sum > inf.len + 1) { adjusted++; acc.doubt = "soma de tempos maior que o compasso ($sum/${inf.len})"; if (dbg) System.err.println("BADSUM sys$si bar$mi slot$k v$vid sum=$sum len=${inf.len}") }
                         }
                     }
                     accs[k] += acc
@@ -921,11 +921,14 @@ object VectorOmr {
                 if (inf.ferm) me.mark = "fermata"
                 if (k == 0) { me.tempo = inf.tempo; me.rit = inf.rit }
                 me.clef = ac.clef
+                me.doubt = ac.doubt
                 part.measures += me
             }
             score.parts += part
         }
         if (adjusted > 0) warnings += "$adjusted compasso(s) tiveram a duração ajustada (ritmo mais complexo que o leitor entende)."
+        val doubtBars = score.parts.flatMap { p -> p.measures.filter { it.doubt != null }.map { it.number } }.distinct().sorted()
+        if (doubtBars.isNotEmpty()) warnings += "Leitura incerta nos compassos ${doubtBars.joinToString(", ")}: o ritmo não fechou com a fórmula de compasso. Confira com a partitura original; não invento notas nem altero compassos."
         return OmrResult(score, score.parts.size, systems.size, notes, bars, adjusted, warnings)
     }
 

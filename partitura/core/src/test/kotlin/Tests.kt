@@ -682,6 +682,29 @@ fun main() {
         check("Exercícios: $total exercícios, todos com compassos completos e sons", total >= 40 && torto == 0)
         check("Flauta doce: Dó5 todos os furos tampados, Dó6 só polegar e 2º furo", Study.RECORDER[0].holes.all { it } && Study.RECORDER.first { it.pitch.octave == 6 && it.pitch.step == 'C' }.holes.count { it } == 2)
     }
+
+    run {
+        val lib = Curriculum.piano
+        check("Currículo: ${lib.size} exercícios, ids únicos", lib.size > 80 && lib.map { it.id }.toSet().size == lib.size)
+        check("Currículo: pré-requisitos existem", lib.all { l -> l.prerequisites.all { Curriculum.byId(it) != null } })
+        check("Currículo: pré-requisito nunca é de nível maior", lib.all { l -> l.prerequisites.all { Curriculum.byId(it)!!.level <= l.level } })
+        check("Currículo: todas as partituras são válidas (compassos fecham)", lib.all { Validate.measureDurations(it.score()).isEmpty() && it.score().parts[0].measures.isNotEmpty() })
+        val g = Curriculum.byId("esc-maior-G")!!
+        val gn = g.score().parts[0].measures.flatMap { it.notes }.filter { it.pitch != null }.map { it.pitch!! }
+        check("Escala de Sol: Fá♯ e 8 notas até a oitava", gn.first().step == 'G' && gn.any { it.step == 'F' && it.alter == 1 } && gn.none { it.step == 'F' && it.alter == 0 })
+        val eb = Curriculum.byId("esc-maior-E♭")!!.score().parts[0].measures.flatMap { it.notes }.mapNotNull { it.pitch }
+        check("Escala de Mi♭: Mi♭, Lá♭, Si♭", eb.any { it.step == 'E' && it.alter == -1 } && eb.any { it.step == 'A' && it.alter == -1 } && eb.any { it.step == 'B' && it.alter == -1 })
+        check("Armadura da escala de Fá♯ = 6♯", Curriculum.byId("esc-maior-F♯")!!.score().fifths == 6)
+        val t = Curriculum.byId("esc-maior-C")!!.score(2).parts[0].measures[0].notes.first().pitch!!
+        check("Troca de tom: Dó +2 semitons = Ré", t.step == 'D' && t.alter == 0)
+        check("Digitação não é inventada: menor harmônica sem digitação", Curriculum.byId("esc-menor_harmonica-A")!!.fingering == null)
+        val p = Progress(); val c = Curriculum.byId("esc-maior-C")!!
+        check("Progresso: só o Dó maior está liberado no início", Curriculum.unlocked(c, p) && !Curriculum.unlocked(Curriculum.byId("esc-maior-G")!!, p))
+        p.record(c, 100, 80, 60, 1); check("Progresso: 80% de acerto não conclui", p.map[c.id]!!.done.not() && Curriculum.next(p)!!.id == c.id)
+        p.record(c, 100, 95, 60, 2); check("Progresso: 95% no alvo conclui e libera o próximo", p.map[c.id]!!.done && Curriculum.next(p)!!.id != c.id)
+        val q = Progress.parse(p.serialize()); check("Progresso: salvar e carregar mantém os dados", q.map[c.id]!!.attempts == 2 && q.map[c.id]!!.done && q.map[c.id]!!.bestHit == 95)
+        val d = Measure(1, doubt = "x").dup(); check("Dúvida de leitura sobrevive à cópia do compasso", d.doubt == "x")
+    }
     println(if (fails == 0) "TODOS OS TESTES PASSARAM" else "$fails FALHAS")
     kotlin.system.exitProcess(if (fails == 0) 0 else 1)
 }
