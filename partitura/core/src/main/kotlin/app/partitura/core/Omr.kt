@@ -774,6 +774,7 @@ object Omr {
             score.parts += part
         }
         if (adjusted > 0) warnings += "$adjusted compasso(s) com ritmo que não fechou; foram completados com pausas ou cortados. Confira no Estúdio."
+        warnings += "Letra NÃO lida: esta leitura é de imagem (foto ou PDF escaneado) e o app não tem reconhecimento de texto no aparelho. Para a letra por sílabas, use o PDF digital (com texto), o servidor privado, ou digite no Estúdio em «Letra…»."
         return OmrResult(score, staves.size, sysN, noteCount, nMeas, adjusted, warnings)
     }
 

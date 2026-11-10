@@ -749,6 +749,19 @@ fun main() {
         check("Ranking: salva e relê", back.rows.size == 3 && back.total == r.total && back.top(1).first().id == "a")
         check("Ranking: títulos", Ranking.title(0) == "Iniciante" && Ranking.title(300) == "Aprendiz" && Ranking.title(9000) == "Mestre")
     }
+    run {
+        // letra de PDF real: o texto entre as pautas do coro e o texto de pautas únicas precisam virar sílabas nas notas
+        val dir = java.io.File("/tmp/pdfs")
+        val f = dir.listFiles()?.firstOrNull { it.name.contains("DIGNO") }
+        if (f != null) {
+            val r = VectorOmr.read(f.readBytes(), OmrOptions())
+            val withLy = r?.score?.parts?.sumOf { p -> p.measures.sumOf { m -> m.notes.count { it.lyric != null } } } ?: 0
+            check("PDF real: letra do coro lida por sílabas (>= 350 sílabas)", withLy >= 350)
+            val syl = r?.score?.parts?.flatMap { p -> p.measures.flatMap { it.notes } }?.filter { it.lyric != null }?.map { it.syl }?.toSet() ?: emptySet()
+            check("PDF real: sílabas marcam início/meio/fim de palavra", syl.containsAll(setOf('b', 'e', 's')))
+            check("PDF real: aviso diz quantas sílabas foram lidas", r?.warnings?.any { it.startsWith("Letra lida") } == true)
+        }
+    }
     println(if (fails == 0) "TODOS OS TESTES PASSARAM" else "$fails FALHAS")
     kotlin.system.exitProcess(if (fails == 0) 0 else 1)
 }

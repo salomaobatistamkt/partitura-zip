@@ -175,8 +175,10 @@ fun ListenScreen(state: AppState) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     KeyboardProfile.PRESETS.forEachIndexed { i, (n, _, _) -> FilterChip(selected = calPreset == i, onClick = { calPreset = i }, label = { Text(n) }) }
                 }
-                Text("Notas escritas no padrão científico (Dó central = C4). Se o seu teclado mostra o Dó central como C3, o C1 dele é o C2 aqui; o que importa é tocar da primeira à última tecla.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Como fazer: aperte Gravar e toque cada tecla uma vez, em ordem, da mais grave à mais aguda, de semitom em semitom (brancas e pretas, sem pular). Segure cerca de 1 segundo e solte antes da próxima, sem pedal, em lugar silencioso, com o app perto do teclado.", style = MaterialTheme.typography.bodySmall)
+                Collapsible("Como calibrar") {
+                    Text("Notas escritas no padrão científico (Dó central = C4). Se o seu teclado mostra o Dó central como C3, o C1 dele é o C2 aqui; o que importa é tocar da primeira à última tecla.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Como fazer: aperte Gravar e toque cada tecla uma vez, em ordem, da mais grave à mais aguda, de semitom em semitom (brancas e pretas, sem pular). Segure cerca de 1 segundo e solte antes da próxima, sem pedal, em lugar silencioso, com o app perto do teclado.", style = MaterialTheme.typography.bodySmall)
+                }
                 Button(onClick = {
                     if (ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startCal()
                     else calPermission.launch(Manifest.permission.RECORD_AUDIO)

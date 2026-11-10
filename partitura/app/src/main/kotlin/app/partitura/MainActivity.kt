@@ -5,6 +5,13 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -98,7 +105,10 @@ fun Root(state: AppState) {
         val wide = maxWidth >= 720.dp
         val full = maxWidth >= 980.dp
         val content: @Composable () -> Unit = {
-            when (tab) {
+            // troca de tela com fade e uma leve subida, em vez de pular de uma vez
+            AnimatedContent(targetState = tab, label = "tela", transitionSpec = {
+                (fadeIn(tween(240, delayMillis = 60)) + slideInVertically(tween(260)) { it / 28 }) togetherWith fadeOut(tween(120))
+            }) { t -> when (t) {
                 0 -> HomeScreen(state)
                 1 -> StudioScreen(state, wide) { tab = 0 }
                 2 -> ConductScreen(state)
@@ -113,7 +123,7 @@ fun Root(state: AppState) {
                 11 -> LearnScreen(state, wide)
                 12 -> ReadingScreen(state, wide)
                 else -> MoreScreen { tab = it }
-            }
+            } }
         }
         if (wide) {
             Row(Modifier.fillMaxSize()) {
@@ -179,7 +189,8 @@ private fun Sidebar(state: AppState, tab: Int, mode: Int, go: (Int) -> Unit) {
         return
     }
     val full = mode == 0
-    Column(Modifier.width(if (full) 248.dp else 96.dp).fillMaxHeight().background(cs.surface).padding(horizontal = if (full) 12.dp else 8.dp, vertical = 14.dp)) {
+    val sideW by animateDpAsState(if (full) 248.dp else 96.dp, tween(280), label = "menu")
+    Column(Modifier.width(sideW).fillMaxHeight().background(cs.surface).padding(horizontal = if (full) 12.dp else 8.dp, vertical = 14.dp)) {
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()),
             horizontalAlignment = if (full) Alignment.Start else Alignment.CenterHorizontally,

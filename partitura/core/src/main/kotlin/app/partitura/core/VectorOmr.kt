@@ -78,6 +78,7 @@ object VectorOmr {
         val pages = try { pdf.pages() } catch (e: Exception) { return null }
         if (pages.isEmpty()) return null
         val warnings = ArrayList<String>()
+        lyricExtraRows = 0
         val systemsAll = ArrayList<SystemData>()
         var title: String? = null; var tempo: Int? = null; var credits: List<Credit> = emptyList()
         for ((pi, pg) in pages.withIndex()) {
@@ -350,6 +351,7 @@ object VectorOmr {
     }
 
     // ----------------------------------------------------------------- texto
+    private var lyricExtraRows = 0
     private class Tok(val text: String, val x: Double, val x1: Double, val y: Double, val size: Double, val chord: Boolean)
 
     private fun textTokens(gl: List<G>, chords: Boolean): List<Tok> {
@@ -361,7 +363,7 @@ object VectorOmr {
             var cur = StringBuilder(); var sx = 0.0; var ex = 0.0; var sy = 0.0; var sz = 0.0; var started = false
             fun flush() { if (started && cur.isNotBlank()) toks += Tok(cur.toString().trim(), sx, ex, sy, sz, chords); cur = StringBuilder(); started = false }
             for (g in s) {
-                if (!chords && (g.ch == 0x2D || g.ch == 0x2013)) { flush(); toks += Tok("-", g.x, g.x + g.adv, g.y, g.size, false); continue }
+                if (!chords && (g.ch == 0x2D || g.ch == 0xAD || g.ch in 0x2010..0x2015)) { flush(); toks += Tok(if (g.ch == 0x2013) "–" else if (g.ch == 0x2014 || g.ch == 0x2015) "—" else "-", g.x, g.x + g.adv, g.y, g.size, false); continue }
                 if (started && g.x - ex > 0.28 * g.size) flush()
                 if (!started) { started = true; sx = g.x; sy = g.y; sz = g.size }
                 val chs = if (g.ch == 0xA8 && chords) "b" else if (g.ch == 0x203F) "_" else if (g.ch == 32) " " else String(Character.toChars(g.ch))
@@ -647,17 +649,29 @@ object VectorOmr {
                 if (!done && lh.isNotEmpty() && rh.isEmpty() && xb > s.x1 - 3 * sp) { lh.minByOrNull { abs(it.y - ym) }?.let { it.tie = true } }
                 if (!done && rh.isNotEmpty() && lh.isEmpty() && xa < (heads.minOfOrNull { it.cx } ?: 1e9) - sp) { rh.minByOrNull { abs(it.y - ym) }?.let { it.tieStop = true } }
             }
-            // letra (linha mais próxima abaixo da pauta)
-            val lowerTop = sy.getOrNull(si + 1)?.top
-            val lt = lyricToks.filter { t ->
-                t.y < s.bot - 0.8 * sp && t.y > s.bot - 9 * sp && t.size > 5 && t.size < 16 &&
-                    (lowerTop == null || (s.bot - t.y) < (t.y - lowerTop)) && t.x >= s.x0 && t.x1 <= s.x1 + 5
-            }
+            // letra: o verso 1 é a linha de texto mais próxima da pauta. Fica normalmente abaixo; em partituras de coro a linha entre duas pautas
+            // do mesmo grupo (ex.: soprano e contralto) vale para as duas; e o texto acima da primeira pauta do sistema vale para ela.
+            val notLyric = setOf("rall", "rit", "ritard", "cresc", "decresc", "dim", "div", "unis", "poco", "a", "tempo", "mf", "mp", "ff", "pp", "sub", "simile", "segue", "fine", "d.c", "d.s", "coda", "fermata", "pizz", "arco")
+            fun okTok(t: Tok) = !(t.text.trim('.', ',').lowercase() in notLyric && t.text.endsWith(".")) && t.size > 5 && t.size < 16 && t.x >= s.x0 && t.x1 <= s.x1 + 5 && t.text.any { it.isLetter() || it == '-' || it == '–' || it == '—' || it == '_' }
+            fun belowOf(st: Staff, t: Tok) = t.y < st.bot - 0.8 * sp && t.y > st.bot - 9 * sp
+            val lower = sy.getOrNull(si + 1)
+            val upper = sy.getOrNull(si - 1)
+            val ownBelow = lyricToks.filter { okTok(it) && belowOf(s, it) && (lower == null || (s.bot - it.y) < (it.y - lower.top) || (lower.grp == s.grp && lower.kind != "brace")) }
+            val sharedFromUpper = if (upper != null && upper.grp == s.grp && s.kind != "brace") {
+                // o texto entre a pauta de cima e esta: fica mais perto desta e esta não tem texto próprio embaixo
+                val ownBelowMe = lyricToks.any { okTok(it) && belowOf(s, it) && (s.bot - it.y) < (it.y - (lower?.top ?: -1e9)) }
+                if (ownBelowMe) emptyList() else lyricToks.filter { okTok(it) && belowOf(upper, it) && (upper.bot - it.y) >= (it.y - s.top) && it.y > s.top && it.y < s.top + 9 * sp }
+            } else emptyList()
+            val aboveFirst = if (upper == null) lyricToks.filter { okTok(it) && it.y > s.top + 0.8 * sp && it.y < s.top + 9 * sp } else emptyList()
+            val lt = if (ownBelow.isNotEmpty() || sharedFromUpper.isNotEmpty()) ownBelow + sharedFromUpper else aboveFirst
             var hasLyrics = false
             if (lt.isNotEmpty() && events.any { !it.rest }) {
-                val ly = lt.maxOf { it.y }   // linha mais próxima (verso 1)
+                // linha de verso 1: a mais próxima da pauta (abaixo: maior y; acima: menor y)
+                val aboveMode = ownBelow.isEmpty() && sharedFromUpper.isEmpty()
+                val ly = if (aboveMode) lt.minOf { it.y } else lt.maxOf { it.y }
                 val line = lt.filter { abs(it.y - ly) < 2.5 }.sortedBy { it.x }
                 val words = line.filter { it.text != "-" && it.text != "–" && it.text != "—" && it.text != "_" }
+                lyricExtraRows += lt.map { (it.y / 2.5).roundToInt() }.distinct().size - 1
                 var lastX = -1e9
                 val ordered = line
                 for ((i, t) in ordered.withIndex()) {
@@ -673,6 +687,7 @@ object VectorOmr {
                     }
                 }
                 if (words.isEmpty()) hasLyrics = false
+                if (System.getProperty("lydbg") != null) System.err.println("LY words=${words.size} assigned=${events.count { it.lyric != null }} notes=${events.count { !it.rest }} lost=" + words.filter { t -> events.none { it.lyric == t.text.trim('_') } }.joinToString("|") { it.text })
             }
             if (System.getProperty("vdbg2") != null && s.x0 > 0) System.err.println("STAFF si=$si y=${s.bot.toInt()} " + events.sortedBy { it.x }.joinToString(" ") { "${it.x.toInt()}:${it.dur}" + (if (it.rest) "r" else "") })
             val meanD = if (heads.isEmpty()) null else heads.map { (if (it.clef == 'G') 30 else 18) + it.pos }.average()
@@ -927,6 +942,9 @@ object VectorOmr {
             score.parts += part
         }
         if (adjusted > 0) warnings += "$adjusted compasso(s) tiveram a duração ajustada (ritmo mais complexo que o leitor entende)."
+        val lyricWords = score.parts.sumOf { p -> p.measures.sumOf { m -> m.notes.count { it.lyric != null } } }
+        if (lyricWords > 0) warnings += "Letra lida: $lyricWords sílaba(s), uma por nota, separadas por sílabas (verso 1)." + (if (lyricExtraRows > 0) " Há ${lyricExtraRows} linha(s) de texto a mais (outros versos) que ainda não são lidas: confira com a partitura." else "")
+        else warnings += "Não encontrei letra neste PDF (pode ser só instrumental, ou o texto estar como imagem/curvas, sem texto pesquisável)."
         val doubtBars = score.parts.flatMap { p -> p.measures.filter { it.doubt != null }.map { it.number } }.distinct().sorted()
         if (doubtBars.isNotEmpty()) warnings += "Leitura incerta nos compassos ${doubtBars.joinToString(", ")}: o ritmo não fechou com a fórmula de compasso. Confira com a partitura original; não invento notas nem altero compassos."
         return OmrResult(score, score.parts.size, systems.size, notes, bars, adjusted, warnings)

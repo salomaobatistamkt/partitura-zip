@@ -35,7 +35,7 @@ fun InstrumentsScreen(state: AppState, wide: Boolean) {
     var inst by rememberSaveable { mutableIntStateOf(0) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Instrumentos", style = MaterialTheme.typography.headlineMedium)
-        Text("Estude no teclado e no braço do violão. Toque em qualquer tecla ou casa para ver e ouvir a nota, ou monte um acorde tocando as notas para o app dizer qual é.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+        Text("Toque numa tecla ou casa para ouvir. Monte um acorde e o app diz qual é.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         Wrap { listOf("Piano", "Violão").forEachIndexed { i, n -> FilterChip(selected = inst == i, onClick = { inst = i }, label = { Text(n) }) } }
         when (inst) {
             0 -> PianoStudy(state, wide)
@@ -88,13 +88,15 @@ private fun PianoStudy(state: AppState, wide: Boolean) {
             Panel {
                 Text("$tn ${scaleType.label.lowercase()}", style = MaterialTheme.typography.titleMedium)
                 Text(notes.joinToString(" – ") { Names.step(it.step, it.alter) } + "   (" + notes.dropLast(1).joinToString(", ") { Study.ptShort(it.step, it.alter) } + ")")
-                val steps = scaleType.intervals.let { iv -> (iv + 12).zipWithNext { a, b -> if (b - a == 2) "T" else if (b - a == 1) "S" else "${(b - a)}" } }
-                Text("Tons e semitons: " + steps.joinToString(" "), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                val fing = if (scaleType == ScaleType.MAIOR) Study.fingering(tn, false) else if (scaleType == ScaleType.MENOR_NATURAL) Study.fingering(tn, true) else null
-                if (fing != null) {
-                    Text("Mão direita (subindo): " + fing.first.joinToString(" "), color = Color(Roles.ARGB[1]))
-                    Text("Mão esquerda (subindo): " + fing.second.joinToString(" "), color = Color(Roles.ARGB[2]))
-                } else Text("Digitação: o app só mostra a que tem certeza (maiores C G D A E F e menores naturais Lá, Mi, Ré). Nesta escala, procure a indicação do seu professor ou método.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Collapsible("Tons, semitons e dedilhado") {
+                    val steps = scaleType.intervals.let { iv -> (iv + 12).zipWithNext { a, b -> if (b - a == 2) "T" else if (b - a == 1) "S" else "${(b - a)}" } }
+                    Text("Tons e semitons: " + steps.joinToString(" "), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    val fing = if (scaleType == ScaleType.MAIOR) Study.fingering(tn, false) else if (scaleType == ScaleType.MENOR_NATURAL) Study.fingering(tn, true) else null
+                    if (fing != null) {
+                        Text("Mão direita (subindo): " + fing.first.joinToString(" "), color = Color(Roles.ARGB[1]))
+                        Text("Mão esquerda (subindo): " + fing.second.joinToString(" "), color = Color(Roles.ARGB[2]))
+                    } else Text("Dedilhado: o app só mostra o que tem certeza (maiores C G D A E F; menores naturais Lá, Mi, Ré). Para esta escala, siga seu professor ou método.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 StaticScore(sc, 0, 190.dp, q = if (playing === sc) qNow else null)
                 Wrap {
                     Button(onClick = { playScore(sc, 100) }) { Text("Ouvir escala") }
@@ -117,9 +119,11 @@ private fun PianoStudy(state: AppState, wide: Boolean) {
                 Text("Notas: " + chord.joinToString(" – ") { Names.step(it.step, it.alter) } + "   (fórmula " + type.tones + ")")
                 Text(chord.joinToString(", ") { Study.ptShort(it.step, it.alter) }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 Wrap { invs.forEachIndexed { i, _ -> FilterChip(selected = invIdx == i, onClick = { invIdx = i }, label = { Text(if (i == 0) "Posição fundamental" else "${i}ª inversão") }) } }
-                val fingers = Study.chordFingers(inv.size)
-                Text("Direita (roxo): " + inv.joinToString(" ") { Names.step(it.step, it.alter) } + (fingers?.let { "  ·  dedos " + it.first.joinToString("-") } ?: ""), color = Color(Roles.ARGB[1]))
-                Text("Esquerda (vermelho): ${Names.step(bassRoot.step, bassRoot.alter)} (fundamental, uma oitava abaixo)" + (fingers?.let { "  ·  dedo 5" } ?: ""), color = Color(Roles.ARGB[2]))
+                Collapsible("Mãos e dedos") {
+                    val fingers = Study.chordFingers(inv.size)
+                    Text("Direita (roxo): " + inv.joinToString(" ") { Names.step(it.step, it.alter) } + (fingers?.let { "  ·  dedos " + it.first.joinToString("-") } ?: ""), color = Color(Roles.ARGB[1]))
+                    Text("Esquerda (vermelho): ${Names.step(bassRoot.step, bassRoot.alter)} (fundamental, uma oitava abaixo)" + (fingers?.let { "  ·  dedo 5" } ?: ""), color = Color(Roles.ARGB[2]))
+                }
                 val sc = remember(rootIdx, chordIdx, invIdx) { Theory.toScore(Study.chordName(rn, type), inv, 4.0, 0, chord = true) }
                 StaticScore(sc, 0, 160.dp, q = if (playing === sc) qNow else null)
                 Wrap {
@@ -131,7 +135,7 @@ private fun PianoStudy(state: AppState, wide: Boolean) {
         3 -> {
             LaunchedEffect(picked.toList()) { rh = picked.toSet(); lh = emptySet() }
             IdentifyPanel(
-                picked.toList(), "Toque nas teclas abaixo, na ordem que quiser: o app vai anotando as notas e dizendo qual acorde elas formam. Toque de novo numa tecla para tirá-la.",
+                picked.toList(), "Toque nas teclas: o app anota e diz o acorde. Toque de novo para tirar.",
                 onClear = { picked.clear() }, onUndo = { if (picked.isNotEmpty()) picked.removeAt(picked.lastIndex) },
                 onPlay = { picked.forEach { m -> p.key(m) } },
                 onArp = { scope.launch { picked.sorted().forEach { m -> p.key(m); delay(260) } } },
@@ -208,7 +212,7 @@ private fun GuitarStudy(state: AppState) {
     } else if (mode == 2) {
         val ms = frets.map { Study.guitarMidi(it.first, it.second) }
         IdentifyPanel(
-            ms, "Toque numa casa de cada corda que fizer parte do acorde (uma casa por corda; solta = casa 0). O app anota e identifica. Toque de novo na mesma casa para tirar.",
+            ms, "Toque uma casa por corda (solta = 0). Toque de novo para tirar.",
             onClear = { frets.clear() }, onUndo = { if (frets.isNotEmpty()) frets.removeAt(frets.lastIndex) },
             onPlay = { frets.forEach { (s, f) -> p.key(Study.guitarMidi(s, f), "guitar") } },
             onArp = { scope.launch { frets.sortedBy { it.first }.forEach { (s, f) -> p.key(Study.guitarMidi(s, f), "guitar"); delay(120) } } },

@@ -2,6 +2,13 @@
 
 Aplicativo de partituras para celular e tablet. Funciona offline.
 
+## Novidades da v0.16
+- **Letra do PDF por sílabas, corrigida:** o leitor só procurava a letra abaixo de cada pauta e perdia a linha de texto entre duas pautas do coro (soprano/contralto) e o texto acima da primeira pauta. Agora ele atribui a mesma linha às pautas do mesmo grupo. Nos 14 PDFs vetoriais de teste, as notas com sílaba foram de ~1.800 para ~6.800 (a maior parte das notas sem letra são pausas, vocalises, pautas em uníssono ou piano). Cada sílaba fica numa nota, marcada como início/meio/fim de palavra. Só o verso 1 é lido; se houver mais versos, o app avisa.
+- **Limite real:** PDF «Microsoft Print to PDF» ou escaneado traz o texto como desenho/imagem, sem texto pesquisável. O app não tem OCR no aparelho; nesses casos avisa que a letra não foi lida (o Hino de Louvor é assim).
+- **Menos texto solto:** explicações longas ficam em seções recolhidas («Tons, semitons e dedilhado», «Passo a passo…», «Como calibrar»), que abrem com animação.
+- **Animações:** troca de tela com fade, menu lateral que recolhe suavemente, teclas do piano com degradê, cantos arredondados e brilho que acende e apaga ao tocar.
+- Não testado no tablet.
+
 ## Novidades da v0.15
 - **Identificar acorde (Instrumentos → Piano e Violão):** toque nas teclas (ou numa casa de cada corda) e o app anota as notas e diz o acorde (ex.: Dó–Mi–Sol = C; Mi–Sol–Dó = C/E, 1ª inversão), listando também as outras leituras possíveis. Precisa de 3 notas diferentes.
 - **Gravar e avaliar (Aprender):** em cada exercício, o microfone ouve você tocar e o app compara nota por nota com a partitura: % de acerto, notas que faltaram ou vieram a mais, oitava errada, regularidade do ritmo e andamento realmente tocado. Se ouvir poucas notas, não dá nota. Só alturas e tempos são avaliados (não dinâmica, pedal nem dedilhado).

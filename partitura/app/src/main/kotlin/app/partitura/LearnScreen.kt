@@ -82,8 +82,8 @@ private fun LessonView(state: AppState, l: Lesson, wide: Boolean, onBack: () -> 
         Text(l.name, style = MaterialTheme.typography.titleLarge)
         Text(l.level.label + " · " + l.module, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("Objetivo: " + l.objective)
-        Text("O que você precisa saber: " + l.knowledge, style = MaterialTheme.typography.bodySmall)
         Text(l.explanation, style = MaterialTheme.typography.bodyMedium)
+        Collapsible("O que você precisa saber") { Text(l.knowledge, style = MaterialTheme.typography.bodySmall) }
     }
     Panel {
         Text("Partitura e teclado", style = MaterialTheme.typography.titleMedium)
@@ -106,9 +106,9 @@ private fun LessonView(state: AppState, l: Lesson, wide: Boolean, onBack: () -> 
             if (p.active) OutlinedButton(onClick = { p.stop() }) { Text("Parar") }
             OutlinedButton(onClick = { state.open(sc.copyDeep()); state.goStudio() }) { Text("Abrir no Estúdio") }
         }
-        Text("Mão direita em roxo, esquerda em vermelho. Passo a passo e dedilhado abaixo.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     Panel {
+        Collapsible("Passo a passo, dedilhado e erros comuns") {
         Text("Passo a passo", style = MaterialTheme.typography.titleMedium)
         l.steps.forEachIndexed { i, st -> Text("${i + 1}. $st") }
         Text("Dedilhado", style = MaterialTheme.typography.titleSmall)
@@ -116,11 +116,13 @@ private fun LessonView(state: AppState, l: Lesson, wide: Boolean, onBack: () -> 
         Text("Erros comuns", style = MaterialTheme.typography.titleSmall)
         l.commonErrors.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
         Text("Andamento: comece em ${l.bpmStart} bpm e chegue a ${l.bpmTarget} bpm.", style = MaterialTheme.typography.bodySmall)
+        }
         Text("Critério de conclusão: ${l.completion}", style = MaterialTheme.typography.bodyMedium)
     }
     MicPanel(state, l, sc, bpm, hands)
     Panel {
-        Text("Registrar tentativa", style = MaterialTheme.typography.titleMedium)
+        Text("Autoavaliação", style = MaterialTheme.typography.titleSmall)
+        Collapsible("Registrar sem microfone") {
         Text("Sem microfone? Informe você mesmo quantos % saíram certos (autoavaliação). Esta tentativa não entra no ranking; só as medidas pelo microfone entram.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Wrap {
             listOf(60, 70, 80, 90, 95, 100).forEach { h ->
@@ -130,6 +132,7 @@ private fun LessonView(state: AppState, l: Lesson, wide: Boolean, onBack: () -> 
                     state.message = if (state.progress.map[l.id]?.done == true) "Exercício concluído!" else "Tentativa registrada: $h% a $bpm bpm."
                 }) { Text("$h%") }
             }
+        }
         }
         val e = state.progress.map[l.id]
         state.progressRev
@@ -148,7 +151,7 @@ fun RankingPanel(state: AppState) {
         else {
             Text("${Ranking.title(r.total)} · ${r.total} pontos", style = MaterialTheme.typography.titleMedium)
             r.top(5).forEachIndexed { i, row -> Text("${i + 1}. ${row.title} — ${row.hit}% · ${row.points} pts", style = MaterialTheme.typography.bodySmall) }
-            Text("Pontos = acerto × nível × (andamento tocado ÷ meta). Conta só a melhor tentativa de cada exercício.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
         }
     }
 }
@@ -199,7 +202,7 @@ private fun MicPanel(state: AppState, l: Lesson, sc: Score, bpm: Int, hands: Int
 
     Panel {
         Text("Tocar e avaliar pelo microfone", style = MaterialTheme.typography.titleMedium)
-        Text("Toque o exercício no seu piano (a mão escolhida acima, no andamento $bpm bpm, um pouco mais devagar também vale). O app ouve, compara nota por nota com a partitura e dá a % de acerto. Não toque o som do app ao mesmo tempo: o microfone captaria os dois.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Toque o exercício no seu piano (a mão escolhida acima, no andamento $bpm bpm, um pouco mais devagar também vale). Não toque o som do app ao mesmo tempo.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Wrap {
             if (!recording) Button(enabled = !busy, onClick = {
                 if (ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startRec() else permission.launch(Manifest.permission.RECORD_AUDIO)
@@ -222,7 +225,7 @@ private fun MicPanel(state: AppState, l: Lesson, sc: Score, bpm: Int, hands: Int
                 if (miss.isNotEmpty()) Text("Não ouvi: " + miss.take(14).joinToString(", ") + if (miss.size > 14) "…" else "", style = MaterialTheme.typography.bodySmall)
                 if (oct.isNotEmpty()) Text("Oitava diferente: " + oct.take(14).joinToString(", "), style = MaterialTheme.typography.bodySmall)
                 Text("+$pts pontos no ranking" + if (state.progress.map[l.id]?.done == true) " · exercício concluído!" else "", style = MaterialTheme.typography.titleSmall)
-                Text("Limite honesto: o app ouve só as alturas e os tempos das notas. Dinâmica, pedal e dedilhado ele não avalia. Em acordes muito cheios ou piano desafinado a escuta pode errar.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Collapsible("Limites da avaliação") { Text("O app ouve só alturas e tempos. Dinâmica, pedal e dedilhado ele não avalia; em acordes muito cheios ou piano desafinado a escuta pode errar.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
         }
     }
