@@ -2,6 +2,13 @@
 
 Aplicativo de partituras para celular e tablet. Funciona offline.
 
+## Novidades da v0.13
+- **Nova aba Instrumentos (Aprender):** *Piano* (escalas maiores/menores/modos com mão direita roxa e esquerda vermelha no teclado, tons e semitons, digitação só onde é segura; dicionário de 15 tipos de acorde com inversões; toque numa tecla e veja nome e frequência), *Violão* (braço com 19 casas e todas as notas, escolha uma nota e veja onde ela está; dicionário de acordes com formas geradas por cálculo, não digitadas), *Flauta doce* soprano (dedilhado barroco, Dó/Ré normal e oitavado).
+- **Exercícios da sua música:** a partir do tom e das cifras da partitura aberta, o app gera 8 exercícios de piano em duas claves (escala, oitavas, cinco dedos, saltos de oitava, arpejos, acompanhamento, baixo de Alberti, cadência). Abrem no Estúdio.
+- **Cores na execução:** melodia amarela, mão direita roxa, mão esquerda vermelha (partitura e teclado). Notas repetidas agora apagam um instante antes de acabar, então o mesmo Fá tocado duas vezes pisca duas vezes.
+- **Regente:** o boneco foi removido; ficam o traçado do gesto, o metrônomo e a contagem.
+- Limites: digitações de escala só para C, G, D, A, E, F (maiores) e Lá, Mi, Ré (menores naturais); dedilhado da flauta nas notas agudas varia entre modelos; formas de acorde do violão sem indicação de dedos; nada disso foi testado no tablet.
+
 ## Novidades da v0.12
 - **Regente refeito, corpo inteiro (Regência):** pernas, quadril, tronco, ombros, cotovelos, punhos, mão e dedos. O movimento nasce do gesto da mão direita e passa por uma cadeia com atraso (punho → cotovelo → ombro → tronco → quadril), então o corpo "segue" a mão: o tronco inclina para a frente no tempo forte, o quadril desce e os joelhos dobram, o peso muda de pé. Mão esquerda relaxada ao lado do corpo, ou espelhada em "Duas mãos". Vistas de costas / lado / frente (arraste para girar). Conferido por imagem (Java2D) e por teste de valores; **não testado no tablet**, e os padrões de regência continuam sem revisão de um regente de verdade.
 - **Calibrar o meu teclado (Ouvir):** você toca uma tecla por vez, da primeira à última (49/61/76/88 teclas), e o app aprende o som de cada tecla. Depois, ao gravar, ele decompõe o áudio nesses moldes. Em teste sintético (piano de SoundFont) acertou mais notas que o motor genérico e sem inventar tantas; **ainda não foi medido com o seu teclado real**.

@@ -77,8 +77,9 @@ private val AREAS = listOf(
     Area(7, "Criatividade", "Letra vira música", Ic.STUDIO, Violet),
     Area(8, "Ouvir", "Tocar vira partitura", Ic.PIANO, Violet),
     Area(9, "Ler", "PDF vira notas", Ic.OPEN, Mint),
+    Area(10, "Instrumentos", "Piano, violão, flauta", Ic.PIANO, Sky),
 )
-private val SECTIONS = listOf("CRIAR" to listOf(0, 1, 9, 8, 7, 2), "APRENDER" to listOf(3, 4), "ARQUIVOS" to listOf(5))
+private val SECTIONS = listOf("CRIAR" to listOf(0, 1, 9, 8, 7, 2), "APRENDER" to listOf(10, 3, 4), "ARQUIVOS" to listOf(5))
 private val PHONE_TABS = listOf(0, 1, 9, 8, 99)
 
 @Composable
@@ -106,6 +107,7 @@ fun Root(state: AppState) {
                 7 -> CreativeScreen(state)
                 8 -> ListenScreen(state)
                 9 -> ScanScreen(state)
+                10 -> InstrumentsScreen(state, wide)
                 else -> MoreScreen { tab = it }
             }
         }
@@ -122,7 +124,7 @@ fun Root(state: AppState) {
                     NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                         PHONE_TABS.forEach { i ->
                             val a = AREAS.getOrNull(i)
-                            val sel = if (i == 99) tab in listOf(9, 3, 2, 4, 5, 6) else tab == i
+                            val sel = if (i == 99) tab in listOf(9, 10, 3, 2, 4, 5, 6) else tab == i
                             val name = a?.name ?: "Mais"
                             NavigationBarItem(
                                 selected = sel, onClick = { tab = i },
@@ -148,7 +150,7 @@ fun Root(state: AppState) {
 private fun MoreScreen(go: (Int) -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Mais", style = MaterialTheme.typography.headlineMedium)
-        listOf(9, 3, 2, 4, 5).forEach { i ->
+        listOf(9, 10, 3, 2, 4, 5).forEach { i ->
             val a = AREAS[i]
             Row(
                 Modifier.fillMaxWidth().clip(MaterialTheme.shapes.large).background(MaterialTheme.colorScheme.surface).clickable { go(i) }.padding(14.dp),

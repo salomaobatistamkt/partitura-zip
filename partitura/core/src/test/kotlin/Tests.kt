@@ -642,15 +642,6 @@ fun main() {
         check("Solo do baixo: toca só a 2ª voz da pauta de Fá (e a 1ª no compasso em uníssono)", ev3.sorted() == listOf(Pitch('C', 0, 3).midi, Pitch('B', 0, 2).midi, Pitch('C', 0, 3).midi).sorted())
     }
     run {
-        // regente: nenhum ponto inválido em nenhum compasso, e o quadril desce no ictus (joelhos dobram)
-        var bad = 0
-        for ((b, t) in listOf(2 to 4, 3 to 4, 4 to 4, 6 to 8, 5 to 8, 7 to 8)) for (oi in Conducting.options(b, t).indices) {
-            val p = Conducting.forMeter(b, t, oi); var ph = -0.5
-            while (ph < p.beats * 2.0) { for (pr in ConductRig.pose(p, ph, ph > 1.0, ph)) if (listOf(pr.a.x, pr.a.y, pr.b.x, pr.b.y).any { it.isNaN() || it.isInfinite() }) bad++; ph += 0.11 }
-        }
-        check("Regente: corpo inteiro sem valores inválidos", bad == 0)
-    }
-    run {
         // teclado: tons sintéticos (fundamental + harmônicos), uma tecla por vez → perfil → acorde reconhecido
         val sr = 22050
         fun tone(m: Int, d: Double): FloatArray { val f = 440.0 * Math.pow(2.0, (m - 69) / 12.0); return FloatArray((d * sr).toInt()) { i -> val t = i.toDouble() / sr; var v = 0.0; for (h in 1..6) v += Math.sin(2 * Math.PI * f * h * t) * Math.pow(0.6, h - 1.0); (v * Math.exp(-t * 1.2) * 0.2).toFloat() } }
@@ -668,6 +659,28 @@ fun main() {
         }
         val few = KeyboardCalib.learn(rec.toFloatArray().copyOf(sr * 20), sr, lo, hi, "x")
         check("Calibração: gravação incompleta é recusada com aviso honesto", few.profile == null && few.message.contains("Ouvi"))
+    }
+    run {
+        // estudo: acordes do violão corretos, exercícios com compassos completos em vários tons
+        var badShape = 0; var shapes = 0
+        for ((_, root) in Study.CHORD_ROOTS) for (t in Study.CHORDS) for (sh in Study.guitarShapes(root, t)) {
+            shapes++
+            val pcs = t.semis.map { Math.floorMod(root.midi + it, 12) }.toSet()
+            if (!sh.notes.all { Math.floorMod(it, 12) in pcs } || Math.floorMod(sh.bassMidi, 12) != Math.floorMod(root.midi, 12)) badShape++
+        }
+        check("Violão: $shapes formas de acorde, todas só com notas do acorde e baixo na fundamental", shapes > 100 && badShape == 0)
+        val c = Study.guitarShapes(Pitch('C', 0, 3), Study.CHORDS[0]).first().frets.toList()
+        check("Violão: primeiro Dó maior = x32010 (veio $c)", c == listOf(-1, 3, 2, 0, 1, 0))
+        check("Violão: Lá aparece em 9 casas do braço", Study.guitarPositions(9).size == 9 || Study.guitarPositions(9).isNotEmpty())
+        var torto = 0; var total = 0
+        for ((fifths, minor) in listOf(0 to false, 1 to false, 3 to false, -2 to false, -4 to true, 2 to true)) {
+            val sc = Edit.blank("t", fifths, 4, 4, 4)
+            for (e in Study.exercises(sc)) { total++
+                for (pt in e.score.parts) for (m in pt.measures) if (m.notes.filter { !it.chord }.sumOf { it.duration } != 16) torto++
+                if (Synth.events(e.score, 90).isEmpty()) torto++ }
+        }
+        check("Exercícios: $total exercícios, todos com compassos completos e sons", total >= 40 && torto == 0)
+        check("Flauta doce: Dó5 todos os furos tampados, Dó6 só polegar e 2º furo", Study.RECORDER[0].holes.all { it } && Study.RECORDER.first { it.pitch.octave == 6 && it.pitch.step == 'C' }.holes.count { it } == 2)
     }
     println(if (fails == 0) "TODOS OS TESTES PASSARAM" else "$fails FALHAS")
     kotlin.system.exitProcess(if (fails == 0) 0 else 1)

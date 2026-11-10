@@ -27,7 +27,7 @@ object ScenePainter {
     private fun str(code: Int) = strCache.getOrPut(code) { String(Character.toChars(code)) }
 
     fun draw(c: android.graphics.Canvas, sc: Scene, sp: Float, ink: Int, hi: Set<Int> = emptySet(), hiColor: Int = ink,
-             sel: Int = -1, selColor: Int = ink, y0: Float = -1e9f, y1: Float = 1e9f) {
+             sel: Int = -1, selColor: Int = ink, y0: Float = -1e9f, y1: Float = 1e9f, roles: IntArray? = null) {
         val gp = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Fonts.bravura; textSize = 4f * sp }
         val lp = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.BUTT }
         val fp = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
@@ -35,7 +35,7 @@ object ScenePainter {
         val path = APath()
         val margin = 7f * sp
         for (it in sc.items) {
-            val color = if (it.note >= 0) (if (it.note == sel) selColor else if (it.note in hi) hiColor else ink) else ink
+            val color = if (it.note >= 0) (if (it.note == sel) selColor else if (it.note in hi) (roles?.getOrNull(it.note)?.let { r -> Roles.ARGB[r] } ?: hiColor) else ink) else ink
             when (it) {
                 is Glyph -> {
                     val y = it.y * sp
@@ -91,7 +91,7 @@ object ScenePainter {
 @Composable
 fun ScoreView(
     scene: Scene, spPx: Float, active: Set<Int>, selected: Int, cursor: () -> Pair<Int, Float>?,
-    scroll: ScrollState, viewportPx: Int, onTap: ((Float, Float) -> Unit)?, modifier: Modifier = Modifier,
+    scroll: ScrollState, viewportPx: Int, onTap: ((Float, Float) -> Unit)?, modifier: Modifier = Modifier, roles: IntArray? = null,
 ) {
     val density = LocalDensity.current
     val heightDp = with(density) { (scene.height * spPx).toInt().toDp() }
@@ -105,7 +105,7 @@ fun ScoreView(
             },
         ) {
             val top = scroll.value.toFloat()
-            drawIntoCanvas { ScenePainter.draw(it.nativeCanvas, scene, spPx, inkArgb, active, amber, selected, blue, top, top + viewportPx) }
+            drawIntoCanvas { ScenePainter.draw(it.nativeCanvas, scene, spPx, inkArgb, active, amber, selected, blue, top, top + viewportPx, roles) }
         }
         Canvas(Modifier.matchParentSize()) {
             val cur = cursor() ?: return@Canvas
@@ -130,7 +130,7 @@ fun StaticScore(score: Score, rev: Int, maxHeight: androidx.compose.ui.unit.Dp, 
         val active by remember(scene) { derivedStateOf { val t = q?.invoke(); if (t == null) emptyList<Int>() else scene.soundingAt(t) } }
         val activeSet = remember(active) { active.toSet() }
         Column(Modifier.verticalScroll(scroll)) {
-            ScoreView(scene, spPx, activeSet, -1, { val t = q?.invoke(); if (t == null) null else scene.cursor(t) }, scroll, vp, null)
+            ScoreView(scene, spPx, activeSet, -1, { val t = q?.invoke(); if (t == null) null else scene.cursor(t) }, scroll, vp, null, roles = remember(score, scene) { Roles.forScene(score, scene) })
         }
     }
 }

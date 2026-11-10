@@ -43,8 +43,6 @@ fun ConductScreen(state: AppState) {
     val options = remember(beats, beatType) { Conducting.options(beats, beatType) }
     val pattern = remember(beats, beatType, opt) { Conducting.forMeter(beats, beatType, opt) }
     var anim by remember { mutableStateOf(false) }
-    var twoHands by remember { mutableStateOf(false) }
-    var yaw by remember { mutableFloatStateOf(0f) }
     var freeQ by remember { mutableDoubleStateOf(0.0) }
 
     // anacruse: se o primeiro compasso é incompleto, os compassos seguintes ainda começam no tempo 1
@@ -99,7 +97,6 @@ fun ConductScreen(state: AppState) {
             val stage: @Composable (Modifier) -> Unit = { m ->
                 Column(m, verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Stage(pattern, phaseNow, curBeat, Modifier.fillMaxWidth())
-                    ConductFigure(pattern, phaseNow, twoHands, yaw, { yaw = it }, Modifier.fillMaxWidth())
                 }
             }
             val side: @Composable () -> Unit = {
@@ -149,14 +146,6 @@ fun ConductScreen(state: AppState) {
                 }
                 Stepper("Andamento (♩ por minuto)", "${state.tempo}", { state.tempo = (state.tempo - 5).coerceAtLeast(30) }, { state.tempo = (state.tempo + 5).coerceAtMost(220) })
                 if (musicOn) Text("Mudar o andamento aqui vale na próxima vez que tocar a música.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                SectionTitle("Figura 3D")
-                Wrap {
-                    listOf(0f to "Costas (como quem rege vê)", 90f to "Lado", 180f to "Frente (como o coro vê)").forEach { (a, l) ->
-                        FilterChip(selected = kotlin.math.abs(((yaw - a + 540f) % 360f) - 180f) < 20f, onClick = { yaw = a }, label = { Text(l) })
-                    }
-                    FilterChip(selected = twoHands, onClick = { twoHands = !twoHands }, label = { Text("Duas mãos (espelhadas)") })
-                }
-                Text("Arraste a figura para girar.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 SectionTitle("Fórmula de compasso")
                 Wrap {
                     Conducting.METERS.forEach { (b, bt) ->

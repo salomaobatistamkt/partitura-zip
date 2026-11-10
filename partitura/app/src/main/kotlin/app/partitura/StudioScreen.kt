@@ -132,6 +132,7 @@ fun StudioScreen(state: AppState, wide: Boolean, goHome: () -> Unit) {
                     cursor = { if (p.active) scene.cursor(p.posQ) else null },
                     scroll = scroll, viewportPx = viewport, onTap = onTap,
                     modifier = Modifier.clip(MaterialTheme.shapes.medium),
+                    roles = remember(s, scene) { Roles.forScene(s, scene) },
                 )
             }
 
@@ -178,7 +179,8 @@ fun StudioScreen(state: AppState, wide: Boolean, goHome: () -> Unit) {
                     Spacer(Modifier.weight(1f))
                     Text(if (state.editMode) "As teclas escrevem a nota na partitura" else "Toque para ouvir", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                PianoKeyboard(kbFirst, kbLast, pianoActive(state, p), marks, { m -> if (state.editMode) state.writeNote(m) else p.key(m, state.timbreOf(state.selP)) }, height = if (wide) 110.dp else 84.dp)
+                val lit = pianoActive(state, p)
+                PianoKeyboard(kbFirst, kbLast, lit.keys, marks, { m -> if (state.editMode) state.writeNote(m) else p.key(m, state.timbreOf(state.selP)) }, height = if (wide) 110.dp else 84.dp, roles = lit.mapValues { it.value shr 1 }, attack = lit.filterValues { (it and 1) == 1 }.keys)
             }
         }
     }
@@ -196,23 +198,37 @@ fun StudioScreen(state: AppState, wide: Boolean, goHome: () -> Unit) {
     }
 }
 
-/** Notas soando agora, calculadas de novo a cada mudança de posição (o piano de baixo acompanha a música). */
+/**
+ * Teclas acesas agora: tecla → papel×2 + (1 se acabou de atacar). Cada nota apaga um instante antes de acabar, para a mesma nota repetida
+ * (Fá, Fá) piscar duas vezes em vez de parecer uma nota longa — isso é essencial para ensinar o ritmo.
+ */
 @Composable
-private fun pianoActive(state: AppState, p: Player): Set<Int> {
-    val s = state.score ?: return emptySet()
+private fun pianoActive(state: AppState, p: Player): Map<Int, Int> {
+    val s = state.score ?: return emptyMap()
     val rev = state.rev
     val ev = remember(s, rev, p.usedTempo) { Synth.events(s, p.usedTempo).sortedBy { it.startSec } }
+    val roles = remember(ev) { Roles.forEvents(s, ev) }
     val maxDur = remember(ev) { ev.maxOfOrNull { it.durSec } ?: 0.0 }
     val set by remember(ev) {
         derivedStateOf {
-            if (!p.active) emptySet<Int>() else {
+            if (!p.active) emptyMap<Int, Int>() else {
                 val t = p.posSec
-                // só as notas que começaram há menos que a maior duração (busca binária, em vez de varrer a música toda a cada quadro)
                 var lo = 0; var hi = ev.size
                 while (lo < hi) { val mid = (lo + hi) ushr 1; if (ev[mid].startSec <= t + 1e-6) lo = mid + 1 else hi = mid }
-                val out = HashSet<Int>()
+                val out = HashMap<Int, Int>()
                 var i = lo - 1
-                while (i >= 0 && ev[i].startSec >= t - maxDur - 1e-6) { val e = ev[i]; if (t < e.startSec + e.durSec) out += e.midi; i-- }
+                while (i >= 0 && ev[i].startSec >= t - maxDur - 1e-6) {
+                    val e = ev[i]
+                    val gap = minOf(0.10, e.durSec * 0.30)
+                    if (t < e.startSec + e.durSec - gap) {
+                        val fresh = if (t - e.startSec < 0.12) 1 else 0
+                        val r = roles[i]
+                        val old = out[e.midi]
+                        // melodia vence mão direita vence mão esquerda quando duas pautas tocam a mesma tecla
+                        if (old == null || r < (old shr 1)) out[e.midi] = (r shl 1) or fresh
+                    }
+                    i--
+                }
                 out
             }
         }
