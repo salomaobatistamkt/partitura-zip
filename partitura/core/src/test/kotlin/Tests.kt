@@ -705,6 +705,50 @@ fun main() {
         val q = Progress.parse(p.serialize()); check("Progresso: salvar e carregar mantém os dados", q.map[c.id]!!.attempts == 2 && q.map[c.id]!!.done && q.map[c.id]!!.bestHit == 95)
         val d = Measure(1, doubt = "x").dup(); check("Dúvida de leitura sobrevive à cópia do compasso", d.doubt == "x")
     }
+
+    run {
+        // Identify
+        val c = Identify.chords(listOf(60, 64, 67)).firstOrNull()
+        check("Identify: C-E-G = C maior", c != null && c.name == "C" && c.inversion == 0)
+        check("Identify: C-Eb-G = Cm", Identify.chords(listOf(60, 63, 67)).firstOrNull()?.name == "Cm")
+        val inv = Identify.chords(listOf(64, 67, 72)).firstOrNull()
+        check("Identify: E-G-C = C/E, 1ª inversão", inv != null && inv.name == "C/E" && inv.inversion == 1)
+        check("Identify: C-E-G-Bb = C7", Identify.chords(listOf(60, 64, 67, 70)).any { it.name == "C7" })
+        check("Identify: A-C-E-G inclui Am7", Identify.chords(listOf(57, 60, 64, 67)).any { it.name == "Am7" })
+        check("Identify: 2 notas não identificam", Identify.chords(listOf(60, 64)).isEmpty())
+        // Assess
+        val ex = (0 until 8).map { Synth.Event(it * 0.5, 0.4, 60 + it, 0) }
+        val perfect = ex.map { NoteEvent(it.startSec + 1.0, it.startSec + 1.4, it.midi) }
+        val r1 = Assess.compare(ex, perfect)
+        check("Assess: execução perfeita (mesmo atrasada) = 100%", r1.reliable && r1.hit == 100 && r1.exact == 8)
+        val slow = ex.map { NoteEvent(it.startSec * 1.25 + 0.3, it.startSec * 1.25 + 0.6, it.midi) }
+        val r2 = Assess.compare(ex, slow)
+        check("Assess: mais lento mede razão de andamento ~1.25", r2.hit == 100 && Math.abs(r2.tempoRatio - 1.25) < 0.05 && r2.achievedBpm(100) in 76..84)
+        val bad = perfect.filterIndexed { i, _ -> i != 3 } + NoteEvent(5.0, 5.2, 80)
+        val r3 = Assess.compare(ex, bad)
+        check("Assess: 1 nota faltando e 1 extra reduz o acerto", r3.missing == 1 && r3.extra == 1 && r3.hit in 60..90)
+        check("Assess: silêncio não é avaliado", !Assess.compare(ex, emptyList()).reliable)
+        // Reading
+        for (cl in listOf('G', 'F')) {
+            val q = Reading.noteQuiz(cl, 10, false, 7)
+            check("Reading: 10 perguntas de nota na clave de $cl", q.size == 10 && q.all { it.score().parts.isNotEmpty() })
+        }
+        val dq = Reading.durQuiz(10, 3)
+        check("Reading: 10 perguntas de valor, respostas válidas", dq.size == 10 && dq.all { Reading.answer(it) in listOf(0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0) && Reading.durScore(it).parts.isNotEmpty() })
+        check("Reading: veredito por faixa", Reading.verdict(95).startsWith("Excelente") && Reading.verdict(50).startsWith("Parabéns") && Reading.verdict(20).contains("revisar"))
+        check("Fills: lições novas montam em vários tons", Fills.lessons().size > 60 && Fills.lessons().all { l -> listOf(-6, 0, 5).all { t -> l.score(t).parts.all { p -> p.measures.all { m -> m.notes.filter { !it.chord }.sumOf { it.duration } == 16 || l.id.startsWith("arp-") && !l.id.startsWith("arp-diatonico") } } } })
+    }
+    run {
+        val r = Ranking()
+        r.add(Ranking.Row(1, "ex", "a", "Escala\tC", 2, 90, 80, Ranking.points(90, 2, 80, 100)))
+        r.add(Ranking.Row(2, "ex", "a", "Escala C", 2, 95, 100, Ranking.points(95, 2, 100, 100)))
+        r.add(Ranking.Row(3, "leitura", "l", "Leitura", 0, 70, 0, Ranking.points(70, 0, 0, 0)))
+        check("Ranking: pontos = acerto × nível × velocidade", Ranking.points(90, 2, 80, 100) == 216 && Ranking.points(100, 0, 200, 100) == 100)
+        check("Ranking: total conta só a melhor de cada exercício", r.total == 285 + 70)
+        val back = Ranking.parse(r.serialize())
+        check("Ranking: salva e relê", back.rows.size == 3 && back.total == r.total && back.top(1).first().id == "a")
+        check("Ranking: títulos", Ranking.title(0) == "Iniciante" && Ranking.title(300) == "Aprendiz" && Ranking.title(9000) == "Mestre")
+    }
     println(if (fails == 0) "TODOS OS TESTES PASSARAM" else "$fails FALHAS")
     kotlin.system.exitProcess(if (fails == 0) 0 else 1)
 }

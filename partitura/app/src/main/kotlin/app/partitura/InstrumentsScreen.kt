@@ -28,19 +28,18 @@ import kotlinx.coroutines.launch
 
 private val MINOR_TYPES = setOf(ScaleType.MENOR_NATURAL, ScaleType.MENOR_HARMONICA, ScaleType.MENOR_MELODICA, ScaleType.DORICO, ScaleType.FRIGIO)
 
-/** Aba "Instrumentos": estudo de piano (escalas, dicionário de acordes, exercícios da sua partitura), violão (braço e acordes) e flauta doce (dedilhado). */
+/** Aba "Instrumentos": estudo de piano (escalas, dicionário e identificador de acordes, exercícios da sua partitura) e violão (braço e acordes). */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun InstrumentsScreen(state: AppState, wide: Boolean) {
     var inst by rememberSaveable { mutableIntStateOf(0) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Instrumentos", style = MaterialTheme.typography.headlineMedium)
-        Text("Estude no teclado, no braço do violão e na flauta doce. Toque em qualquer tecla ou casa para ver e ouvir a nota.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
-        Wrap { listOf("Piano", "Violão", "Flauta doce").forEachIndexed { i, n -> FilterChip(selected = inst == i, onClick = { inst = i }, label = { Text(n) }) } }
+        Text("Estude no teclado e no braço do violão. Toque em qualquer tecla ou casa para ver e ouvir a nota, ou monte um acorde tocando as notas para o app dizer qual é.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+        Wrap { listOf("Piano", "Violão").forEachIndexed { i, n -> FilterChip(selected = inst == i, onClick = { inst = i }, label = { Text(n) }) } }
         when (inst) {
             0 -> PianoStudy(state, wide)
-            1 -> GuitarStudy(state)
-            else -> RecorderStudy(state)
+            else -> GuitarStudy(state)
         }
     }
 }
@@ -56,6 +55,7 @@ private fun midiLabel(m: Int): String {
 @Composable
 private fun PianoStudy(state: AppState, wide: Boolean) {
     val p = state.player
+    val scope = rememberCoroutineScope()
     var mode by rememberSaveable { mutableIntStateOf(0) }
     var scaleType by remember { mutableStateOf(ScaleType.MAIOR) }
     var tonicIdx by rememberSaveable { mutableIntStateOf(0) }
@@ -67,9 +67,10 @@ private fun PianoStudy(state: AppState, wide: Boolean) {
     fun playScore(sc: Score, tempo: Int) { playing = sc; p.start(sc, tempo, listOf(1.0), 0.0, Double.MAX_VALUE, false) }
     val qNow: () -> Double? = { if (p.active) p.posQ else null }
 
-    Wrap { listOf("Escalas", "Dicionário de acordes", "Exercícios da sua música").forEachIndexed { i, n -> FilterChip(selected = mode == i, onClick = { mode = i }, label = { Text(n) }) } }
+    Wrap { listOf("Escalas", "Dicionário de acordes", "Exercícios da sua música", "Identificar acorde").forEachIndexed { i, n -> FilterChip(selected = mode == i, onClick = { mode = i }, label = { Text(n) }) } }
 
     // teclado de referência: mão direita roxa, mão esquerda vermelha
+    val picked = remember { mutableStateListOf<Int>() }
     var rh by remember { mutableStateOf(emptySet<Int>()) }
     var lh by remember { mutableStateOf(emptySet<Int>()) }
 
@@ -127,6 +128,15 @@ private fun PianoStudy(state: AppState, wide: Boolean) {
                 }
             }
         }
+        3 -> {
+            LaunchedEffect(picked.toList()) { rh = picked.toSet(); lh = emptySet() }
+            IdentifyPanel(
+                picked.toList(), "Toque nas teclas abaixo, na ordem que quiser: o app vai anotando as notas e dizendo qual acorde elas formam. Toque de novo numa tecla para tirá-la.",
+                onClear = { picked.clear() }, onUndo = { if (picked.isNotEmpty()) picked.removeAt(picked.lastIndex) },
+                onPlay = { picked.forEach { m -> p.key(m) } },
+                onArp = { scope.launch { picked.sorted().forEach { m -> p.key(m); delay(260) } } },
+            )
+        }
         else -> {
             val s = state.score
             if (s == null) {
@@ -156,7 +166,7 @@ private fun PianoStudy(state: AppState, wide: Boolean) {
         Text(tapInfo ?: "Toque numa tecla para ver o nome e ouvir.", style = MaterialTheme.typography.titleSmall)
         val first = 48; val last = if (wide) 84 else 72
         val roles = remember(rh, lh) { buildMap { for (m in lh) put(m, 2); for (m in rh) put(m, 1) } }
-        PianoKeyboard(first, last, rh + lh, emptySet(), { m -> tapped = m; p.key(m) }, height = if (wide) 120.dp else 90.dp, roles = roles, attack = rh + lh)
+        PianoKeyboard(first, last, rh + lh, emptySet(), { m -> tapped = m; p.key(m); if (mode == 3) { if (m in picked) picked.remove(m) else picked.add(m) } }, height = if (wide) 120.dp else 90.dp, roles = roles, attack = rh + lh)
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("● mão direita", color = Color(Roles.ARGB[1]), style = MaterialTheme.typography.labelMedium)
             Text("● mão esquerda", color = Color(Roles.ARGB[2]), style = MaterialTheme.typography.labelMedium)
@@ -176,8 +186,9 @@ private fun GuitarStudy(state: AppState) {
     var tapped by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var rootIdx by rememberSaveable { mutableIntStateOf(0) }
     var chordIdx by rememberSaveable { mutableIntStateOf(0) }
+    val frets = remember { mutableStateListOf<Pair<Int, Int>>() }   // uma casa por corda, na ordem em que foram tocadas
 
-    Wrap { listOf("Braço: todas as notas", "Dicionário de acordes").forEachIndexed { i, n -> FilterChip(selected = mode == i, onClick = { mode = i }, label = { Text(n) }) } }
+    Wrap { listOf("Braço: todas as notas", "Dicionário de acordes", "Identificar acorde").forEachIndexed { i, n -> FilterChip(selected = mode == i, onClick = { mode = i }, label = { Text(n) }) } }
     if (mode == 0) {
         Panel {
             Text("Cordas soltas (da mais grossa para a mais fina): Mi, Lá, Ré, Sol, Si, Mi", style = MaterialTheme.typography.titleSmall)
@@ -188,10 +199,25 @@ private fun GuitarStudy(state: AppState) {
             }
             val t = tapped
             Text(if (t != null) { val m = Study.guitarMidi(t.first, t.second); "Corda ${6 - t.first} (${Study.GUITAR_STRING_NAMES[t.first]}), casa ${t.second}: " + midiLabel(m) } else "Toque numa casa para ouvir.", style = MaterialTheme.typography.titleSmall)
-            Fretboard(showPc, tapped) { s, f -> tapped = s to f; p.key(Study.guitarMidi(s, f), "guitar") }
+            Fretboard(showPc, setOfNotNull(tapped)) { s, f -> tapped = s to f; p.key(Study.guitarMidi(s, f), "guitar") }
             if (showPc >= 0) {
                 val pos = Study.guitarPositions(showPc)
                 Text("${Study.pcName(showPc)} aparece em ${pos.size} casas: " + pos.sortedBy { it.first }.reversed().joinToString("; ") { "corda ${6 - it.first} casa ${it.second}" }, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    } else if (mode == 2) {
+        val ms = frets.map { Study.guitarMidi(it.first, it.second) }
+        IdentifyPanel(
+            ms, "Toque numa casa de cada corda que fizer parte do acorde (uma casa por corda; solta = casa 0). O app anota e identifica. Toque de novo na mesma casa para tirar.",
+            onClear = { frets.clear() }, onUndo = { if (frets.isNotEmpty()) frets.removeAt(frets.lastIndex) },
+            onPlay = { frets.forEach { (s, f) -> p.key(Study.guitarMidi(s, f), "guitar") } },
+            onArp = { scope.launch { frets.sortedBy { it.first }.forEach { (s, f) -> p.key(Study.guitarMidi(s, f), "guitar"); delay(120) } } },
+        )
+        Panel(pad = 10.dp) {
+            Fretboard(-1, frets.toSet()) { s, f ->
+                p.key(Study.guitarMidi(s, f), "guitar")
+                val same = frets.firstOrNull { it.first == s }
+                if (same == s to f) frets.remove(same) else { if (same != null) frets.remove(same); frets.add(s to f) }
             }
         }
     } else {
@@ -218,7 +244,7 @@ private fun GuitarStudy(state: AppState) {
 }
 
 @Composable
-private fun Fretboard(showPc: Int, tapped: Pair<Int, Int>?, onTap: (Int, Int) -> Unit) {
+private fun Fretboard(showPc: Int, tapped: Set<Pair<Int, Int>>, onTap: (Int, Int) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val cell = 52f; val top = 26f; val gap = 30f
     val frets = Study.GUITAR_FRETS
@@ -260,7 +286,7 @@ private fun Fretboard(showPc: Int, tapped: Pair<Int, Int>?, onTap: (Int, Int) ->
             for (s in 0 until 6) for (f in 0..frets) {
                 val pc = Math.floorMod(Study.guitarMidi(s, f), 12)
                 val show = showPc == -1 || pc == showPc
-                val isTap = tapped?.first == s && tapped.second == f
+                val isTap = (s to f) in tapped
                 if (!show && !isTap) continue
                 val cx = if (f == 0) nut - cell * 0.35f * u else nut + (f - 0.5f) * cell * u
                 val cy = (top + gap * (5 - s)) * u
@@ -305,47 +331,37 @@ private fun ChordDiagram(sh: Study.Shape, onTap: () -> Unit) {
     }
 }
 
-// ====================================================================== FLAUTA DOCE
-
+/** Painel comum de "identificar acorde": mostra as notas anotadas e os acordes que elas formam. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun RecorderStudy(state: AppState) {
-    val p = state.player
-    var sel by rememberSaveable { mutableIntStateOf(0) }
-    val f = Study.RECORDER[sel.coerceIn(0, Study.RECORDER.lastIndex)]
+private fun IdentifyPanel(midis: List<Int>, help: String, onClear: () -> Unit, onUndo: () -> Unit, onPlay: () -> Unit, onArp: () -> Unit) {
+    val found = remember(midis) { Identify.chords(midis) }
     Panel {
-        Text("Flauta doce soprano (dedilhado barroco/inglês)", style = MaterialTheme.typography.titleMedium)
-        Text("A soprano começa no Dó5 (todos os furos tampados) e sobe sem trocar de instrumento. Para o som uma oitava acima (oitavado), o dedilhado muda e o sopro fica um pouco mais forte, mas sem estourar. Bolinha cheia = furo tampado; vazia = aberto. O primeiro furo é o do polegar, atrás.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Wrap { Study.RECORDER.forEachIndexed { i, fg -> FilterChip(selected = sel == i, onClick = { sel = i; p.key(fg.pitch.midi, "flute") }, label = { Text(Names.step(fg.pitch.step, fg.pitch.alter) + (if (fg.pitch.octave >= 6) " (oitavado)" else "")) }) } }
-        Row(horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
-            RecorderDiagram(f.holes, Modifier.width(76.dp).height(260.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(Study.ptName(f.pitch) + (if (f.pitch.octave >= 6) " — oitavado (agudo)" else if (f.pitch.step in listOf('C', 'D') && f.pitch.alter == 0) " — normal (grave)" else ""), style = MaterialTheme.typography.titleMedium)
-                Text(midiLabel(f.pitch.midi), style = MaterialTheme.typography.bodySmall)
-                Text("Furos tampados: " + (if (f.holes[0]) "polegar" else "polegar solto") + ", " + f.holes.indices.drop(1).filter { f.holes[it] }.joinToString(" ").ifEmpty { "nenhum" }, style = MaterialTheme.typography.bodyMedium)
-                if (f.note.isNotBlank()) Text(f.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Button(onClick = { p.key(f.pitch.midi, "flute") }) { Text("Ouvir") }
+        Text("Identificar acorde", style = MaterialTheme.typography.titleMedium)
+        Text(help, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (midis.isEmpty()) Text("Nenhuma nota ainda.", style = MaterialTheme.typography.titleSmall)
+        else {
+            Text("Notas: " + midis.joinToString(" – ") { Names.pitch(Spell.forMidi(it, 0)) }, style = MaterialTheme.typography.titleSmall)
+            val pcs = midis.map { Math.floorMod(it, 12) }.distinct()
+            if (found.isEmpty()) Text(
+                if (pcs.size < 3) "Preciso de pelo menos 3 notas diferentes para dizer um acorde (tenho ${pcs.size})."
+                else "Não encontrei um acorde do dicionário com exatamente essas notas.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            ) else {
+                val best = found.first()
+                Text(best.name, style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
+                Text(best.description + " · notas: " + best.notes.joinToString(" – ") { Names.step(it.step, it.alter) }, style = MaterialTheme.typography.bodyMedium)
+                if (found.size > 1) {
+                    Text("Também pode ser:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    found.drop(1).take(5).forEach { Text("• ${it.name} — ${it.description}", style = MaterialTheme.typography.bodySmall) }
+                }
             }
         }
-        Text("Dica: Dó e Ré aparecem duas vezes na lista — o normal (grave) e o oitavado (agudo). Notas de outras flautas (contralto, tenor) soam em outro registro.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Composable
-private fun RecorderDiagram(holes: BooleanArray, modifier: Modifier) {
-    val cs = MaterialTheme.colorScheme
-    Canvas(modifier) {
-        val w = size.width; val h = size.height
-        drawRoundRect(cs.surfaceVariant, Offset(w * 0.30f, 0f), Size(w * 0.40f, h), androidx.compose.ui.geometry.CornerRadius(w * 0.2f))
-        fun hole(i: Int, x: Float, y: Float, r: Float) {
-            if (holes[i]) drawCircle(cs.primary, r, Offset(x, y)) else drawCircle(cs.onSurface, r, Offset(x, y), style = Stroke(3f))
+        Wrap {
+            Button(onClick = onPlay, enabled = midis.isNotEmpty()) { Text("Ouvir junto") }
+            OutlinedButton(onClick = onArp, enabled = midis.isNotEmpty()) { Text("Ouvir em arpejo") }
+            OutlinedButton(onClick = onUndo, enabled = midis.isNotEmpty()) { Text("Desfazer") }
+            OutlinedButton(onClick = onClear, enabled = midis.isNotEmpty()) { Text("Limpar") }
         }
-        val r = w * 0.15f
-        hole(0, w * 0.10f, h * 0.08f, r * 0.9f)                // polegar (atrás)
-        hole(1, w * 0.5f, h * 0.12f, r); hole(2, w * 0.5f, h * 0.22f, r); hole(3, w * 0.5f, h * 0.32f, r)
-        hole(4, w * 0.5f, h * 0.48f, r)
-        hole(5, w * 0.5f, h * 0.58f, r)
-        hole(6, w * 0.40f, h * 0.70f, r * 0.8f); hole(6, w * 0.60f, h * 0.70f, r * 0.8f)
-        hole(7, w * 0.40f, h * 0.82f, r * 0.8f); hole(7, w * 0.60f, h * 0.82f, r * 0.8f)
     }
 }

@@ -1,5 +1,9 @@
 package app.partitura
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -8,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.partitura.core.*
 
@@ -25,6 +30,7 @@ fun LearnScreen(state: AppState, wide: Boolean) {
         val done = all.count { prog.map[it.id]?.done == true }
         val total = prog.map.values.sumOf { it.seconds } / 60
         Text("$done de ${all.size} exercícios concluídos · $total min de prática registrados neste aparelho", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+        if (sel == null) RankingPanel(state)
         val next = Curriculum.next(prog)
         if (next != null) Panel {
             Text("Recomendado agora", style = MaterialTheme.typography.titleSmall)
@@ -112,9 +118,10 @@ private fun LessonView(state: AppState, l: Lesson, wide: Boolean, onBack: () -> 
         Text("Andamento: comece em ${l.bpmStart} bpm e chegue a ${l.bpmTarget} bpm.", style = MaterialTheme.typography.bodySmall)
         Text("Critério de conclusão: ${l.completion}", style = MaterialTheme.typography.bodyMedium)
     }
+    MicPanel(state, l, sc, bpm, hands)
     Panel {
         Text("Registrar tentativa", style = MaterialTheme.typography.titleMedium)
-        Text("Você mesmo informa quantos % saíram certos (autoavaliação). A comparação automática pelo microfone ainda não está ligada a este exercício.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Sem microfone? Informe você mesmo quantos % saíram certos (autoavaliação). Esta tentativa não entra no ranking; só as medidas pelo microfone entram.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Wrap {
             listOf(60, 70, 80, 90, 95, 100).forEach { h ->
                 OutlinedButton(onClick = {
@@ -127,5 +134,96 @@ private fun LessonView(state: AppState, l: Lesson, wide: Boolean, onBack: () -> 
         val e = state.progress.map[l.id]
         state.progressRev
         if (e != null) Text("Melhor: ${e.bestHit}% · melhor andamento limpo: ${e.bestBpm} bpm · ${e.attempts} tentativa(s)" + if (e.done) " · concluído" else "", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/** Ranking pessoal: título, pontos totais e melhores exercícios. Fica só neste aparelho. */
+@Composable
+fun RankingPanel(state: AppState) {
+    state.progressRev
+    val r = state.ranking
+    Panel {
+        Text("Seu ranking (só neste aparelho)", style = MaterialTheme.typography.titleSmall)
+        if (r.rows.isEmpty()) Text("Ainda sem pontos. Toque um exercício com «Gravar e avaliar» ou faça um quiz de leitura.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        else {
+            Text("${Ranking.title(r.total)} · ${r.total} pontos", style = MaterialTheme.typography.titleMedium)
+            r.top(5).forEachIndexed { i, row -> Text("${i + 1}. ${row.title} — ${row.hit}% · ${row.points} pts", style = MaterialTheme.typography.bodySmall) }
+            Text("Pontos = acerto × nível × (andamento tocado ÷ meta). Conta só a melhor tentativa de cada exercício.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** Grava você tocando, ouve as notas e compara com o exercício: % de acerto, notas erradas/faltando, ritmo e andamento realmente tocado. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MicPanel(state: AppState, l: Lesson, sc: Score, bpm: Int, hands: Int) {
+    val ctx = LocalContext.current
+    val p = state.player
+    val rec = remember { MicRecorder() }
+    val main = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    var recording by remember(l.id) { mutableStateOf(false) }
+    var busy by remember(l.id) { mutableStateOf(false) }
+    var res by remember(l.id) { mutableStateOf<Assess.Result?>(null) }
+    var asked by remember(l.id) { mutableIntStateOf(bpm) }
+    var pts by remember(l.id) { mutableIntStateOf(0) }
+    var err by remember(l.id) { mutableStateOf<String?>(null) }
+    DisposableEffect(l.id) { onDispose { if (rec.isRunning) rec.stop() } }
+
+    fun startRec() { p.stop(); res = null; err = null; rec.start(); recording = true }
+    fun finish() {
+        val audio = rec.stop(); val sr = rec.rate; recording = false; busy = true
+        val askedBpm = bpm; val hs = hands; val score = sc
+        val profFile = java.io.File(ctx.filesDir, "keyboard.profile")
+        Thread {
+            try {
+                if (audio.size < sr / 2) throw IllegalStateException("A gravação ficou curta demais (menos de meio segundo).")
+                val profile = try { if (profFile.exists()) KeyboardProfile.fromBytes(profFile.readBytes()) else null } catch (_: Throwable) { null }
+                val heard = Listener.hear(ctx, audio, sr, profile) { _, _ -> }
+                val ev = Synth.events(score, askedBpm).filter { hs == 0 || (hs == 1 && it.part == 0) || (hs == 2 && it.part == 1) }
+                val r = Assess.compare(ev, heard.notes)
+                val secs = (audio.size / sr).coerceIn(0, 3600)
+                main.post {
+                    res = r; asked = askedBpm; busy = false
+                    if (r.reliable) {
+                        val played = r.achievedBpm(askedBpm)
+                        val points = Ranking.points(r.hit, l.level.ordinal, played, l.bpmTarget)
+                        pts = points
+                        state.progress.record(l, played, r.hit, secs, System.currentTimeMillis()); state.saveProgress()
+                        state.ranking.add(Ranking.Row(System.currentTimeMillis(), "ex", l.id, l.name, l.level.ordinal, r.hit, played, points)); state.saveRanking()
+                    }
+                }
+            } catch (e: Throwable) { main.post { err = e.message ?: e.toString(); busy = false } }
+        }.start()
+    }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) startRec() else err = "Sem permissão do microfone não consigo ouvir você tocar." }
+
+    Panel {
+        Text("Tocar e avaliar pelo microfone", style = MaterialTheme.typography.titleMedium)
+        Text("Toque o exercício no seu piano (a mão escolhida acima, no andamento $bpm bpm, um pouco mais devagar também vale). O app ouve, compara nota por nota com a partitura e dá a % de acerto. Não toque o som do app ao mesmo tempo: o microfone captaria os dois.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Wrap {
+            if (!recording) Button(enabled = !busy, onClick = {
+                if (ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startRec() else permission.launch(Manifest.permission.RECORD_AUDIO)
+            }) { Text(if (res == null) "Gravar e avaliar" else "Gravar de novo") }
+            else Button(onClick = { finish() }) { Text("Parar e avaliar") }
+        }
+        if (recording) Text("Gravando… toque agora e depois aperte «Parar e avaliar».", color = MaterialTheme.colorScheme.primary)
+        if (busy) Text("Ouvindo e comparando…")
+        err?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        res?.let { r ->
+            if (!r.reliable) Text(r.message, color = MaterialTheme.colorScheme.error)
+            else {
+                Text("${r.hit}% de acerto", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
+                Text(r.message)
+                Text("Andamento: pedido $asked bpm · você tocou cerca de ${r.achievedBpm(asked)} bpm", style = MaterialTheme.typography.bodyMedium)
+                if (r.rhythmMs > 0) Text("Regularidade: desvio médio de ${r.rhythmMs.toInt()} ms (${r.rhythmOk} de ${r.exact + r.octaveOff} notas dentro de 0,12 s)", style = MaterialTheme.typography.bodySmall)
+                fun nm(m: Int) = Names.pitch(Spell.forMidi(m, 0))
+                val miss = r.items.filter { it.status == "faltou" }.map { nm(it.midi) }
+                val oct = r.items.filter { it.status == "oitava errada" }.map { nm(it.midi) }
+                if (miss.isNotEmpty()) Text("Não ouvi: " + miss.take(14).joinToString(", ") + if (miss.size > 14) "…" else "", style = MaterialTheme.typography.bodySmall)
+                if (oct.isNotEmpty()) Text("Oitava diferente: " + oct.take(14).joinToString(", "), style = MaterialTheme.typography.bodySmall)
+                Text("+$pts pontos no ranking" + if (state.progress.map[l.id]?.done == true) " · exercício concluído!" else "", style = MaterialTheme.typography.titleSmall)
+                Text("Limite honesto: o app ouve só as alturas e os tempos das notas. Dinâmica, pedal e dedilhado ele não avalia. Em acordes muito cheios ou piano desafinado a escuta pode errar.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }

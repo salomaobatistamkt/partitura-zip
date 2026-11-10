@@ -77,10 +77,11 @@ private val AREAS = listOf(
     Area(7, "Criatividade", "Letra vira música", Ic.STUDIO, Violet),
     Area(8, "Ouvir", "Tocar vira partitura", Ic.PIANO, Violet),
     Area(9, "Ler", "PDF vira notas", Ic.OPEN, Mint),
-    Area(10, "Instrumentos", "Piano, violão, flauta", Ic.PIANO, Sky),
+    Area(10, "Instrumentos", "Piano e violão", Ic.PIANO, Sky),
     Area(11, "Aprender", "Método de piano", Ic.PIANO, Mint),
+    Area(12, "Leitura", "Notas e valores", Ic.THEORY, Sky),
 )
-private val SECTIONS = listOf("CRIAR" to listOf(0, 1, 9, 8, 7, 2), "APRENDER" to listOf(11, 10, 3, 4), "ARQUIVOS" to listOf(5))
+private val SECTIONS = listOf("CRIAR" to listOf(0, 1, 9, 8, 7, 2), "APRENDER" to listOf(11, 12, 10, 3, 4), "ARQUIVOS" to listOf(5))
 private val PHONE_TABS = listOf(0, 1, 9, 8, 99)
 
 @Composable
@@ -110,6 +111,7 @@ fun Root(state: AppState) {
                 9 -> ScanScreen(state)
                 10 -> InstrumentsScreen(state, wide)
                 11 -> LearnScreen(state, wide)
+                12 -> ReadingScreen(state, wide)
                 else -> MoreScreen { tab = it }
             }
         }

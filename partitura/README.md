@@ -2,6 +2,15 @@
 
 Aplicativo de partituras para celular e tablet. Funciona offline.
 
+## Novidades da v0.15
+- **Identificar acorde (Instrumentos → Piano e Violão):** toque nas teclas (ou numa casa de cada corda) e o app anota as notas e diz o acorde (ex.: Dó–Mi–Sol = C; Mi–Sol–Dó = C/E, 1ª inversão), listando também as outras leituras possíveis. Precisa de 3 notas diferentes.
+- **Gravar e avaliar (Aprender):** em cada exercício, o microfone ouve você tocar e o app compara nota por nota com a partitura: % de acerto, notas que faltaram ou vieram a mais, oitava errada, regularidade do ritmo e andamento realmente tocado. Se ouvir poucas notas, não dá nota. Só alturas e tempos são avaliados (não dinâmica, pedal nem dedilhado).
+- **Ranking pessoal (só neste aparelho):** pontos = acerto × nível × (andamento tocado ÷ meta); conta a melhor tentativa de cada exercício. Não há ranking online.
+- **Nova aba Leitura:** 10 perguntas por rodada, com % no fim: nota na clave de Sol, na de Fá, nas duas (com ou sem linhas suplementares) e valor das figuras e pausas (1 tempo, ½, ¼, 1½…).
+- **Mais conteúdo:** arpejos de menor, diminuto, aumentado, 7, 7M, m7, add9 e 9, mais inversões; arpejo diatônico (Dó maior e outros tons); preenchimentos entre os acordes de I–V–vi–IV em 12 tons (escala subindo, descendo, aproximação cromática) e frase de ligação 1–5–8–9–10.
+- **Removido:** a seção de flauta doce.
+- Limites: preenchimentos e frases foram montados por regras de teoria, não copiados de um método publicado; sem dedilhado afirmado onde não há certeza. O CI só prova compilação e testes do núcleo; microfone, telas e desempenho **não foram testados no tablet**.
+
 ## Novidades da v0.13
 - **Nova aba Instrumentos (Aprender):** *Piano* (escalas maiores/menores/modos com mão direita roxa e esquerda vermelha no teclado, tons e semitons, digitação só onde é segura; dicionário de 15 tipos de acorde com inversões; toque numa tecla e veja nome e frequência), *Violão* (braço com 19 casas e todas as notas, escolha uma nota e veja onde ela está; dicionário de acordes com formas geradas por cálculo, não digitadas), *Flauta doce* soprano (dedilhado barroco, Dó/Ré normal e oitavado).
 - **Exercícios da sua música:** a partir do tom e das cifras da partitura aberta, o app gera 8 exercícios de piano em duas claves (escala, oitavas, cinco dedos, saltos de oitava, arpejos, acompanhamento, baixo de Alberti, cadência). Abrem no Estúdio.

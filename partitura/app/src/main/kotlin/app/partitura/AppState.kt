@@ -183,6 +183,9 @@ class AppState(private val app: Context) {
     val progress: Progress by lazy { Progress.parse(runCatching { File(app.filesDir, "progress.tsv").readText() }.getOrDefault("")) }
     var progressRev by mutableIntStateOf(0)
     fun saveProgress() { runCatching { File(app.filesDir, "progress.tsv").writeText(progress.serialize()) }; progressRev++ }
+    /** Ranking pessoal (pontos das tentativas medidas e dos quizzes), salvo em ranking.tsv, só neste aparelho. */
+    val ranking: Ranking by lazy { Ranking.parse(runCatching { File(app.filesDir, "ranking.tsv").readText() }.getOrDefault("")) }
+    fun saveRanking() { runCatching { File(app.filesDir, "ranking.tsv").writeText(ranking.serialize()) }; progressRev++ }
     var selP by mutableIntStateOf(0)
     var selM by mutableIntStateOf(0)
     var selN by mutableIntStateOf(0)

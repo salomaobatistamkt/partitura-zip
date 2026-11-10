@@ -58,7 +58,7 @@ object Curriculum {
     )
     private val MINOR_NAT_FING = mapOf("A" to ("1 2 3 1 2 3 4 5" to "5 4 3 2 1 3 2 1"), "E" to ("1 2 3 1 2 3 4 5" to "5 4 3 2 1 3 2 1"), "D" to ("1 2 3 1 2 3 4 5" to "5 4 3 2 1 3 2 1"))
 
-    private fun shift(p: Pitch, semis: Int): Pitch {
+    internal fun shift(p: Pitch, semis: Int): Pitch {
         if (semis == 0) return p
         val m = p.midi + semis
         // grafia por sustenido/bemol conforme o sentido da transposição
@@ -108,7 +108,7 @@ object Curriculum {
     }
 
     /** Armadura (nº de ♯ positivo, ♭ negativo) de uma tônica maior; 0 se improvável. */
-    private fun keySig(t: Pitch): Int {
+    internal fun keySig(t: Pitch): Int {
         val order = listOf("F♭", "C♭", "G♭", "D♭", "A♭", "E♭", "B♭", "F", "C", "G", "D", "A", "E", "B", "F♯", "C♯")
         val n = Study.ptShort(t.step, t.alter).let { _ -> "${t.step}${when (t.alter) { 1 -> "♯"; -1 -> "♭"; else -> "" }}" }
         val i = order.indexOf(n); return if (i < 0) 0 else i - 8
@@ -168,6 +168,7 @@ object Curriculum {
         for (m in listOf(ScaleType.DORICO, ScaleType.FRIGIO, ScaleType.LIDIO, ScaleType.MIXOLIDIO)) out += scaleLesson("C", Pitch('C', 0, 4), m, Level.ESPECIALIZACAO, null, listOf("esc-maior-C"))
         for ((lab, t) in MAJ) out += fieldLesson(lab, t, true, if (lab in easy) Level.BASICO else Level.INTERMEDIARIO, listOf("esc-maior-$lab"))
         for ((lab, t) in MIN) out += fieldLesson(lab, t, false, Level.INTERMEDIARIO, listOf("esc-menor_natural-$lab"))
+        out += Fills.lessons()
         out
     }
 
