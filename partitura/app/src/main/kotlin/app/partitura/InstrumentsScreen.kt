@@ -88,7 +88,6 @@ private fun PianoStudy(state: AppState, wide: Boolean) {
             Panel {
                 Text("$tn ${scaleType.label.lowercase()}", style = MaterialTheme.typography.titleMedium)
                 Text(notes.joinToString(" – ") { Names.step(it.step, it.alter) } + "   (" + notes.dropLast(1).joinToString(", ") { Study.ptShort(it.step, it.alter) } + ")")
-                Collapsible("Tons, semitons e dedilhado") {
                     Collapsible("Tons, semitons e dedilhado", "Fórmula da escala e dedos") {
                     val steps = scaleType.intervals.let { iv -> (iv + 12).zipWithNext { a, b -> if (b - a == 2) "T" else if (b - a == 1) "S" else "${(b - a)}" } }
                     Text("Tons e semitons: " + steps.joinToString(" "), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
