@@ -123,7 +123,6 @@ private fun PianoStudy(state: AppState, wide: Boolean) {
                     Text("Direita (roxo): " + inv.joinToString(" ") { Names.step(it.step, it.alter) } + (fingers?.let { "  ·  dedos " + it.first.joinToString("-") } ?: ""), color = Color(Roles.ARGB[1]))
                     Text("Esquerda (vermelho): ${Names.step(bassRoot.step, bassRoot.alter)} (fundamental, uma oitava abaixo)" + (fingers?.let { "  ·  dedo 5" } ?: ""), color = Color(Roles.ARGB[2]))
                 }
-                }
                 val sc = remember(rootIdx, chordIdx, invIdx) { Theory.toScore(Study.chordName(rn, type), inv, 4.0, 0, chord = true) }
                 StaticScore(sc, 0, 160.dp, q = if (playing === sc) qNow else null)
                 Wrap {
