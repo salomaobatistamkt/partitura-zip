@@ -122,30 +122,6 @@ fun Panel(modifier: Modifier = Modifier, pad: Dp = 16.dp, content: @Composable C
     )
 }
 
-/** Bloco que abre e fecha com animação: deixa a tela limpa e a informação de apoio um toque adiante. */
-@Composable
-fun Collapsible(title: String, hint: String? = null, startOpen: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
-    var open by androidx.compose.runtime.saveable.rememberSaveable(title) { mutableStateOf(startOpen) }
-    val rot by androidx.compose.animation.core.animateFloatAsState(if (open) 90f else 0f, androidx.compose.animation.core.tween(220), label = "seta")
-    Column(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).clickable { open = !open }.padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.graphicsLayer { rotationZ = rot })
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleSmall)
-                if (hint != null && !open) Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        androidx.compose.animation.AnimatedVisibility(
-            open,
-            enter = androidx.compose.animation.expandVertically(androidx.compose.animation.core.tween(260)) + androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(260)),
-            exit = androidx.compose.animation.shrinkVertically(androidx.compose.animation.core.tween(200)) + androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(150)),
-        ) { Column(Modifier.fillMaxWidth().padding(start = 6.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp), content = content) }
-    }
-}
-
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun Wrap(content: @Composable () -> Unit) {
