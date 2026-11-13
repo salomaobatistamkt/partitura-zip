@@ -106,7 +106,7 @@ object Dsp {
  * Motor próprio (sem modelo de IA) de reserva: soma de harmônicos com cancelamento iterativo, vários sons ao mesmo tempo.
  * Funciona bem em áudio limpo de um instrumento; em gravações ruidosas ou muito densas o Basic Pitch é melhor.
  */
-class SpectralTranscriber(val maxPoly: Int = 4, val lowMidi: Int = 40, val highMidi: Int = 96) {
+class SpectralTranscriber(val maxPoly: Int = 4, val lowMidi: Int = 24, val highMidi: Int = 108) {
     companion object { const val SR = 22050; const val N = 4096; const val HOP = 512; const val NFFT = 8192; const val ONSET_LEAD = 0.012 }
 
     class Frames(val act: Array<FloatArray>, val raw: Array<FloatArray>, val lowMidi: Int, val onsets: DoubleArray = DoubleArray(0))

@@ -56,6 +56,12 @@ object VectorOmr {
             if (f.contains("Text")) return if (ch in 0x30..0x39) "tupDigit" else if (ch.toChar() in "fmpszr") "dyn" else null
             if (f.contains("Chords")) return "chord"
             if (ch in 0x30..0x39) return "timeDigit"
+            // Opus Std (Sibelius) segue o mapa Sonata em Unicode (Mac Roman): œ cabeça cheia, ˙ cabeça de mínima, Œ pausa de semínima etc.
+            when (ch) {
+                0x26 -> return "clefG"; 0x3f -> return "clefF"; 0x62 -> return "flat"; 0x23 -> return "sharp"; 0x6e -> return "natural"
+                0x153 -> return "headFilled"; 0x2d9 -> return "headHalf"; 0x77 -> return "headWhole"
+                0x2211 -> return "restWhole"; 0xd3 -> return "restHalf"; 0x152 -> return "restQuarter"; 0x2030 -> return "rest8"
+            }
             if (ch == 0x4a || ch == 0x6a) return "flag"
             if (ch == 0x4b || ch == 0x6b) return "flag2"
             if (ch == 0x4c || ch == 0x6c) return "flag3"
@@ -79,6 +85,7 @@ object VectorOmr {
         if (pages.isEmpty()) return null
         val warnings = ArrayList<String>()
         lyricExtraRows = 0
+        curVerse = o.verse
         val systemsAll = ArrayList<SystemData>()
         var title: String? = null; var tempo: Int? = null; var credits: List<Credit> = emptyList()
         for ((pi, pg) in pages.withIndex()) {
@@ -118,7 +125,7 @@ object VectorOmr {
 
     /** Trechos de texto (palavras na mesma linha) de fontes comuns: títulos, "rit.", "a tempo", "= 80", "1."… */
     private fun textRuns(gl: List<G>): List<Run> {
-        val src = gl.filter { it.c == "" && !isMusicFont(it.font) && (it.ch in 32..0x2FF || it.ch in 0x2010..0x2015) }.sortedBy { it.y }
+        val src = gl.filter { it.c == "" && !isMusicFont(it.font) && (it.ch in 32..0x2FF || it.ch in 0xFB00..0xFB06 || it.ch in 0x2010..0x2015) }.sortedBy { it.y }
         val rows = ArrayList<ArrayList<G>>()
         for (g in src) { val l = rows.lastOrNull(); if (l != null && abs(l[0].y - g.y) < 1.2) l += g else rows += arrayListOf(g) }
         val out = ArrayList<Run>()
@@ -352,10 +359,13 @@ object VectorOmr {
 
     // ----------------------------------------------------------------- texto
     private var lyricExtraRows = 0
+    private var curVerse = 1
+    private val chordCenter = java.util.IdentityHashMap<Harmony0, Double>()
     private class Tok(val text: String, val x: Double, val x1: Double, val y: Double, val size: Double, val chord: Boolean)
 
     private fun textTokens(gl: List<G>, chords: Boolean): List<Tok> {
-        val src = gl.filter { if (chords) it.c == "chord" else (it.c == "" && !isMusicFont(it.font) && it.ch in 32..0x2FF || it.ch in 0x2010..0x2015 || it.ch == 0x203F) }
+        val src = gl.filter { if (chords) it.c == "chord" else (it.c == "" && !isMusicFont(it.font) && (it.ch in 32..0x2FF || it.ch in 0xFB00..0xFB06) || it.ch in 0x2010..0x2015 || it.ch == 0x203F) }
+        if (System.getProperty("gdbg") != null && !chords) for (g in gl.filter { it.c == "" && it.y.toInt() == 668 && it.x in 440.0..500.0 }) System.err.println("G ch=0x${g.ch.toString(16)} font=${g.font} x=${g.x.toInt()} inSrc=${g in src}")
         val lines = src.groupBy { (it.y / 1.2).roundToInt() }.values
         val toks = ArrayList<Tok>()
         for (ln in lines) {
@@ -366,7 +376,7 @@ object VectorOmr {
                 if (!chords && (g.ch == 0x2D || g.ch == 0xAD || g.ch in 0x2010..0x2015)) { flush(); toks += Tok(if (g.ch == 0x2013) "–" else if (g.ch == 0x2014 || g.ch == 0x2015) "—" else "-", g.x, g.x + g.adv, g.y, g.size, false); continue }
                 if (started && g.x - ex > 0.28 * g.size) flush()
                 if (!started) { started = true; sx = g.x; sy = g.y; sz = g.size }
-                val chs = if (g.ch == 0xA8 && chords) "b" else if (g.ch == 0x203F) "_" else if (g.ch == 32) " " else String(Character.toChars(g.ch))
+                val chs = if (g.ch == 0xA8 && chords) "b" else if (g.ch == 0x203F) "_" else if (g.ch == 32) " " else if (g.ch in 0xFB00..0xFB06) listOf("ff", "fi", "fl", "ffi", "ffl", "st", "st")[g.ch - 0xFB00] else String(Character.toChars(g.ch))
                 if (g.ch == 32) { flush(); continue }
                 cur.append(chs); ex = g.x + g.adv
             }
@@ -376,10 +386,10 @@ object VectorOmr {
     }
 
     private fun parseChord(t0: String): Harmony0? {
-        val t = t0.replace("♭", "b").replace("♯", "#").replace("♮", "")
+        val t = t0.replace("♭", "b").replace("♯", "#").replace("♮", "").replace("(", "").replace(")", "")
         val m = Regex("^([A-G])([#b]?)([^/]*)(?:/([A-G])([#b]?))?$").find(t) ?: return null
         val q = m.groupValues[3]
-        if (q.any { it.isLetter() && it !in "msuajdiMgn" }) return null
+        if (q.withIndex().any { (i, c) -> c.isLetter() && c !in "msuajdiMgn" && !(c == 'b' && i > 0 && q[i - 1].isDigit()) }) return null
         val kind = when {
             q.contains("maj7") || q.contains("M7") || q.contains("7M") || q.contains("△") -> "major-seventh"
             q.startsWith("dim7") -> "diminished-seventh"
@@ -479,7 +489,7 @@ object VectorOmr {
             fun clefAt(x: Double): Char { var c = clef; for ((cx, cc) in clefMarks) if (cx < x - 0.2 * sp) c = cc; return c }
             val firstX = (heads0 + rests).minOfOrNull { it.x } ?: x1
             val accs = gs.filter { it.c == "flat" || it.c == "sharp" || it.c == "natural" }
-            val ks = accs.filter { it.x < firstX - 3.0 * sp && it.x < s.x0 + 30 * sp && (bars.isEmpty() || it.x < bars[0]) }
+            val ks = accs.filter { it.x < firstX - 1.9 * sp && it.x < s.x0 + 30 * sp && (bars.isEmpty() || it.x < bars[0]) }
             val fifths = ks.count { it.c == "sharp" } - ks.count { it.c == "flat" }
             // mudanças de armadura/fórmula no meio do sistema (logo depois de uma barra)
             val keyMarks = ArrayList<Pair<Double, Int>>(); val tsMarks = ArrayList<Pair<Double, Pair<Int, Int>>>()
@@ -664,12 +674,15 @@ object VectorOmr {
             } else emptyList()
             val aboveFirst = if (upper == null) lyricToks.filter { okTok(it) && it.y > s.top + 0.8 * sp && it.y < s.top + 9 * sp } else emptyList()
             val lt = if (ownBelow.isNotEmpty() || sharedFromUpper.isNotEmpty()) ownBelow + sharedFromUpper else aboveFirst
+            if (System.getProperty("lydbg2") != null) System.err.println("LT si=$si " + lt.sortedWith(compareBy({ -it.y }, { it.x })).joinToString(" ") { "[${it.text}@${it.x.toInt()},${it.y.toInt()}/${it.size.toInt()}]" })
             var hasLyrics = false
             if (lt.isNotEmpty() && events.any { !it.rest }) {
                 // linha de verso 1: a mais próxima da pauta (abaixo: maior y; acima: menor y)
                 val aboveMode = ownBelow.isEmpty() && sharedFromUpper.isEmpty()
-                val ly = if (aboveMode) lt.minOf { it.y } else lt.maxOf { it.y }
-                val line = lt.filter { abs(it.y - ly) < 2.5 }.sortedBy { it.x }
+                val rowYs = ArrayList<Double>()
+                for (y in lt.map { it.y }.sortedBy { if (aboveMode) it else -it }) if (rowYs.none { abs(it - y) < 6.0 }) rowYs += y
+                val ly = rowYs.getOrNull(curVerse - 1)
+                val line = if (ly == null) emptyList() else lt.filter { abs(it.y - ly) < 6.0 }.sortedBy { it.x }
                 val words = line.filter { it.text != "-" && it.text != "–" && it.text != "—" && it.text != "_" }
                 lyricExtraRows += lt.map { (it.y / 2.5).roundToInt() }.distinct().size - 1
                 var lastX = -1e9
@@ -699,6 +712,8 @@ object VectorOmr {
         for (t in chordToks) {
             val h = parseChord(t.text) ?: continue
             if (t.y < sy.last().bot - 3 * sp0 || t.y > sy.first().top + 12 * sp0) continue
+            if (System.getProperty("hdbg") != null) System.err.println("TOK '${t.text}' x=${t.x.toInt()}..${t.x1.toInt()}")
+            chordCenter[h] = (t.x + t.x1) / 2
             harm += Triple(t.x, t.y, h)
         }
         return SystemData(staffData, bars, harm, dbl, repStart, repEnd)
@@ -873,10 +888,11 @@ object VectorOmr {
             for ((hx, hy, h) in sd.harmony) {
                 val under = sd.staves.filter { hy >= it.staff.top - 2 * it.staff.sp }.minByOrNull { hy - it.staff.top } ?: continue
                 val ui = sd.staves.indexOf(under); val k = slotOf[ui]; if (k < 0) continue
-                val mi = (0 until nB).firstOrNull { hx >= xs[it] - 0.01 && hx < xs[it + 1] } ?: continue
+                val cx = chordCenter[h] ?: hx   // a cifra fica centrada sobre a nota
+                val mi = (0 until nB).firstOrNull { cx >= xs[it] - 0.01 && cx < xs[it + 1] } ?: continue
                 val inm = barEvents[k][mi] ?: continue
-                var at = 0.0
-                for (e in inm.filter { !it.rest && it.voice == 1 }.sortedBy { it.x }) { if (e.x <= hx + 0.6 * under.staff.sp) at = e.onset else break }
+                val evs = inm.filter { !it.rest && it.voice == 1 }.sortedBy { it.x }
+                val at = evs.minByOrNull { abs(it.x + 0.6 * under.staff.sp - cx) }?.onset ?: 0.0
                 accs[k][accs[k].size - nB + mi].harm += at.toInt() to h
             }
             // dinâmicas e crescendos

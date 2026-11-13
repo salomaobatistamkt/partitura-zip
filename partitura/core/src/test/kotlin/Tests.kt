@@ -661,6 +661,37 @@ fun main() {
         check("Calibração: gravação incompleta é recusada com aviso honesto", few.profile == null && few.message.contains("Ouvi"))
     }
     run {
+        // faixa completa do Dó1, afinação, batida de tecla e limpeza de notas
+        val sr = 22050
+        fun tone(m: Int, d: Double, cents: Double = 0.0): FloatArray { val f = 440.0 * Math.pow(2.0, (m - 69 + cents / 100.0) / 12.0); return FloatArray((d * sr).toInt()) { i -> val t = i.toDouble() / sr; var v = 0.0; for (h in 1..8) v += Math.sin(2 * Math.PI * f * h * t) * Math.pow(0.65, h - 1.0) * (if (m < 45 && h == 1) 0.3 else 1.0); (v * Math.exp(-t * 1.3) * 0.2).toFloat() } }
+        // afinação: acorde 30 centésimos acima do 440 é medido, e depois de corrigir fica perto de zero
+        val chord = FloatArray(6 * sr); for ((k, m) in listOf(48, 52, 55, 60, 64, 67).withIndex()) { val t = tone(m, 2.0, 30.0); for (i in t.indices) if (i + k * sr / 3 < chord.size) chord[i + k * sr / 3] += t[i] }
+        val est = Tuning.estimate(chord, sr)
+        check("Afinação: mede +30 centésimos (veio ${"%.1f".format(est.cents)})", Math.abs(est.cents - 30.0) < 6.0 && est.confidence > 0.18)
+        val fixed = Tuning.retune(chord, sr, Tuning.correction(chord, sr))
+        check("Afinação: depois de corrigir sobra menos de 8 centésimos", Math.abs(Tuning.estimate(fixed, sr).cents) < 8.0)
+        check("Afinação: instrumento afinado não é mexido", Tuning.correction(FloatArray(6 * sr).also { a -> for ((k, m) in listOf(48, 55, 64).withIndex()) { val t = tone(m, 2.0); for (i in t.indices) if (i + k * sr / 2 < a.size) a[i + k * sr / 2] += t[i] } }, sr) == 0.0)
+        // calibração de Dó1 a Dó2 com batidas de tecla (ataques falsos) no meio: o alinhamento descarta os falsos
+        val lo = 24; val hi = 40; val rec = ArrayList<Float>()
+        for (m in lo..hi) {
+            for (v in tone(m, 1.0)) rec += v
+            if (m == 30 || m == 35) { repeat((0.25 * sr).toInt()) { rec += 0f }; val rnd = java.util.Random(m.toLong()); repeat((0.05 * sr).toInt()) { rec += (rnd.nextGaussian() * 0.12).toFloat() }; repeat((0.2 * sr).toInt()) { rec += 0f } }
+            else repeat((0.5 * sr).toInt()) { rec += 0f }
+        }
+        val r = KeyboardCalib.learn(rec.toFloatArray(), sr, lo, hi, "grave")
+        check("Calibração do Dó1: aprende ${hi - lo + 1} teclas mesmo com batidas falsas (${r.message})", r.profile != null && r.profile!!.lowMidi == 24)
+        val prof = r.profile
+        if (prof != null) {
+            val mix = FloatArray(3 * sr); for (m in listOf(24, 31, 40)) { val t = tone(m, 2.0); for (i in t.indices) mix[i + sr / 2] += t[i] }
+            val got = NmfTranscriber(prof).transcribe(mix, sr).map { it.midi }.toSet()
+            check("Calibração do Dó1: Dó1+Sol1+Mi2 reconhecidos (${got.sorted()})", got.containsAll(listOf(24, 31, 40)) && got.size <= 5)
+            check("Perfil guarda o ruído da sala e sobrevive a salvar/ler", KeyboardProfile.fromBytes(prof.toBytes())?.templates?.size == prof.templates.size)
+        }
+        val ruido = listOf(NoteEvent(1.0, 1.08, 26), NoteEvent(1.0, 1.6, 50), NoteEvent(2.0, 2.5, 50), NoteEvent(2.52, 2.9, 50, 0.4))
+        val limpo = NoteCleanup.apply(ruido)
+        check("Limpeza: nota grave de 80 ms (batida) cai; eco da mesma nota é juntado (${limpo.size} notas)", limpo.none { it.midi == 26 } && limpo.count { it.midi == 50 } == 2)
+    }
+    run {
         // estudo: acordes do violão corretos, exercícios com compassos completos em vários tons
         var badShape = 0; var shapes = 0
         for ((_, root) in Study.CHORD_ROOTS) for (t in Study.CHORDS) for (sh in Study.guitarShapes(root, t)) {

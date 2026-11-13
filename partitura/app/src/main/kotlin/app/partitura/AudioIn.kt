@@ -208,26 +208,35 @@ class Heard(val notes: List<NoteEvent>, val engine: String, val seconds: Double)
 object Listener {
     /** Áudio → notas. Tenta o Basic Pitch; se falhar por qualquer motivo, usa o motor espectral próprio. */
     fun hear(ctx: Context, audio: FloatArray, sr: Int, profile: KeyboardProfile? = null, progress: (Float, String) -> Unit): Heard {
-        val x = BasicPitch.normalize(audio)
-        val secs = x.size.toDouble() / sr
+        val x0 = BasicPitch.normalize(audio)
+        val secs = x0.size.toDouble() / sr
         if (profile != null) {
             try {
                 progress(0f, "Moldes do seu teclado")
-                val notes = NmfTranscriber(profile).transcribe(x, sr) { progress(it, "Moldes do seu teclado") }
+                val notes = NmfTranscriber(profile).transcribe(x0, sr) { progress(it, "Moldes do seu teclado") }
                 return Heard(notes, "Seu teclado calibrado (${profile.label.ifBlank { "${profile.keys} teclas" }})", secs)
             } catch (_: Throwable) { /* cai para os outros motores */ }
+        }
+        // afinação: teclado/piano fora de 440 Hz faz os motores genéricos errarem notas inteiras; mede e corrige antes de escutar
+        val cents = try { Tuning.correction(x0, sr) } catch (_: Throwable) { 0.0 }
+        val x = if (cents != 0.0) Tuning.retune(x0, sr, cents) else x0
+        val k = Tuning.factor(cents)
+        val tuneMsg = if (cents != 0.0) ", afinação corrigida ${if (cents > 0) "+" else ""}${cents.toInt()} centésimos" else ""
+        fun back(n: List<NoteEvent>): List<NoteEvent> {
+            val clean = NoteCleanup.apply(n)
+            return if (cents == 0.0) clean else clean.map { NoteEvent(it.start / k, it.end / k, it.midi, it.amp) }
         }
         try {
             val m = BasicPitchModel(ctx)
             try {
                 progress(0f, "Rede neural no aparelho")
                 val notes = BasicPitch.transcribe(x, sr, m) { progress(it, "Rede neural no aparelho") }
-                return Heard(notes, "Basic Pitch (rede neural no aparelho)", secs)
+                return Heard(back(notes), "Basic Pitch (rede neural no aparelho$tuneMsg)", secs)
             } finally { m.close() }
         } catch (e: Throwable) {
             progress(0f, "Motor próprio")
             val notes = SpectralTranscriber().transcribe(x, sr) { progress(it, "Motor próprio") }
-            return Heard(notes, "Motor espectral próprio (o modelo não carregou: ${e.javaClass.simpleName})", secs)
+            return Heard(back(notes), "Motor espectral próprio (o modelo não carregou: ${e.javaClass.simpleName}$tuneMsg)", secs)
         }
     }
 }

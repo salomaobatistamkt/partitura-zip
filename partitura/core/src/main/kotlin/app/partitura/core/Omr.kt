@@ -56,6 +56,8 @@ class OmrOptions(
     /** compasso forçado; null = deduzir da soma dos compassos */
     val beats: Int? = null, val beatType: Int = 4,
     val tempo: Int = 80,
+    /** qual verso da letra ler (1 = linha mais próxima da pauta, 2 = a seguinte…) */
+    val verse: Int = 1,
 )
 
 class OmrResult(val score: Score, val staves: Int, val systems: Int, val notes: Int, val bars: Int, val adjustedBars: Int, val warnings: List<String>)
