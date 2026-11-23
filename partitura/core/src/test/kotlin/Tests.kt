@@ -793,6 +793,67 @@ fun main() {
             check("PDF real: aviso diz quantas sílabas foram lidas", r?.warnings?.any { it.startsWith("Letra lida") } == true)
         }
     }
+    run {
+        // ---- leitura de imagem: medidas, pautas, claves, armadura, sistemas ----
+        val sp = 12; val th = 2; val w = 400; val h = 260
+        fun blank() = BooleanArray(w * h)
+        fun rect(ink: BooleanArray, x0: Int, y0: Int, x1: Int, y1: Int) { for (y in y0..y1) for (x in x0..x1) if (x in 0 until w && y in 0 until h) ink[y * w + x] = true }
+        /** cinco linhas começando em [top], da coluna 40 à 380 */
+        fun lines(ink: BooleanArray, top: Int) { for (k in 0..4) rect(ink, 40, top + k * sp, 379, top + k * sp + th - 1) }
+        val top = 40
+        val staffInk = blank(); lines(staffInk, top)
+        val im = OmrImage(w, h, staffInk)
+        val m = Vision.metrics(im)
+        check("Visão: mede espessura e espaço da pauta", m.thickness == th && kotlin.math.abs(m.space - sp) <= 1.0)
+        check("Visão: acha a pauta", Vision.findStaves(im).size == 1)
+        // um feixe de colcheias grosso cobrindo a pauta não pode apagá-la
+        val beamed = staffInk.copyOf()
+        rect(beamed, 150, top - 6, 260, top + 4 * sp + 6)
+        check("Visão: pauta coberta por feixe continua achada", Vision.findStaves(OmrImage(w, h, beamed)).size == 1)
+        val st = Vision.findStaves(im)
+        val s0 = st[0]
+        // clave de Sol: figura alta que começa acima da linha de cima
+        val gInk = blank()
+        rect(gInk, 55, top - (1.25 * sp).toInt(), 55 + (2.6 * sp).toInt(), top + (5.7 * sp).toInt())
+        check("Visão: clave de Sol pela altura e posição", Vision.clef(gInk, w, h, s0).clef == 'G')
+        // clave de Fá: figura de ~3,3 espaços a partir da linha de cima, com dois pontos
+        val fInk = blank()
+        rect(fInk, 55, top, 55 + (2.0 * sp).toInt(), top + (3.3 * sp).toInt())
+        rect(fInk, 55 + (2.3 * sp).toInt(), top + (sp * 0.6).toInt(), 55 + (2.3 * sp).toInt() + 4, top + (sp * 0.6).toInt() + 4)
+        rect(fInk, 55 + (2.3 * sp).toInt(), top + (sp * 1.5).toInt(), 55 + (2.3 * sp).toInt() + 4, top + (sp * 1.5).toInt() + 4)
+        val fr = Vision.clef(fInk, w, h, s0)
+        check("Visão: clave de Fá pela altura e pelos dois pontos", fr.clef == 'F' && fr.dots == 2)
+        // clave de Dó: cobre a pauta exatamente
+        val cInk = blank()
+        rect(cInk, 55, top, 55 + (2.2 * sp).toInt(), top + 4 * sp)
+        check("Visão: clave de Dó cobre a pauta inteira", Vision.clef(cInk, w, h, s0).clef == 'C')
+        // a barra vertical de abertura não pode ser confundida com clave
+        val barOnly = blank()
+        rect(barOnly, 41, top, 42, top + 4 * sp)
+        check("Visão: barra de abertura não vira clave", Vision.clef(barOnly, w, h, s0).clef == '?')
+        // armadura: dois bemóis nos degraus de si e mi da clave de Sol
+        check("Visão: degraus da armadura descem dois na clave de Fá",
+            Vision.keyPositions('G', false, 2).toList() == listOf(4, 7) && Vision.keyPositions('F', false, 2).toList() == listOf(2, 5))
+        fun flat(ink: BooleanArray, x: Int, pos: Int) {      // pos = meios-espaços desde a linha de baixo
+            val bottom = top + 4 * sp
+            val cy = bottom - pos * sp / 2
+            rect(ink, x, cy - (1.6 * sp).toInt(), x + 1, cy + (sp * 0.5).toInt())     // haste
+            rect(ink, x, cy - (sp * 0.3).toInt(), x + (sp * 0.6).toInt(), cy + (sp * 0.45).toInt())   // barriga
+        }
+        val kInk = gInk.copyOf()
+        flat(kInk, 55 + (3.2 * sp).toInt(), 4)
+        flat(kInk, 55 + (4.3 * sp).toInt(), 7)
+        val kr = Vision.keySignature(kInk, w, h, s0, Vision.clef(kInk, w, h, s0).right, 'G')
+        check("Visão: armadura de dois bemóis", kr.fifths == -2 && kr.fits)
+        // sistemas: duas pautas unidas por traço vertical são um sistema só
+        val two = blank(); lines(two, top); lines(two, top + 9 * sp)
+        val joined = two.copyOf(); rect(joined, 40, top, 41, top + 9 * sp + 4 * sp)
+        val stJ = Vision.findStaves(OmrImage(w, h, joined))
+        check("Visão: traço à esquerda junta as pautas num sistema", stJ.size == 2 && Vision.layout(OmrImage(w, h, joined), stJ).systems == 1)
+        val apart = blank(); lines(apart, top); lines(apart, top + 13 * sp)
+        val stA = Vision.findStaves(OmrImage(w, h, apart))
+        check("Visão: sem traço e longe, são dois sistemas", stA.size == 2 && Vision.layout(OmrImage(w, h, apart), stA).systems == 2)
+    }
     println(if (fails == 0) "TODOS OS TESTES PASSARAM" else "$fails FALHAS")
     kotlin.system.exitProcess(if (fails == 0) 0 else 1)
 }

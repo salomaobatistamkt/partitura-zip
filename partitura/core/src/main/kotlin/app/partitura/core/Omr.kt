@@ -229,6 +229,9 @@ object Omr {
         return clean
     }
 
+    /** Tinta sem as linhas da pauta (útil para depurar e para pré-visualizar a leitura). */
+    fun cleanedInk(im: OmrImage, staves: List<Staff>): BooleanArray = removeLines(im, staves)
+
     private fun erode(src: BooleanArray, w: Int, h: Int, ew: Int, eh: Int): BooleanArray {
         val a = (ew - 1) / 2; val b = ew - 1 - a
         val tmp = BooleanArray(w * h)
@@ -251,10 +254,13 @@ object Omr {
     }
 
     // ---------- leitura principal ----------
-    fun read(im: OmrImage, o: OmrOptions = OmrOptions()): OmrResult {
-        val w = im.w; val h = im.h
+    fun read(src: OmrImage, o: OmrOptions = OmrOptions()): OmrResult {
         val warnings = ArrayList<String>()
-        val staves = detectStaves(im)
+        val (im, skew) = Vision.deskew(src)
+        if (skew != 0.0) warnings += "A página estava torta ${"%.1f".format(abs(skew))}°; endireitei antes de ler."
+        val w = im.w; val h = im.h
+        var staves = Vision.findStaves(im)
+        if (staves.size < 1) staves = detectStaves(im)
         if (staves.isEmpty()) throw IllegalStateException("Não encontrei pautas na imagem. Use um PDF/imagem nítido, com a página inteira e reta.")
         val sp = staves.map { it.space }.sorted()[staves.size / 2]
         if (sp < 6.5) warnings += "Imagem de baixa resolução (espaço da pauta ≈ ${"%.1f".format(sp)} px): a leitura pode errar muito."
@@ -276,22 +282,10 @@ object Omr {
         val clefs = ArrayList<Char>()
         val keySigs = ArrayList<Int>()
 
-        // agrupa pautas em sistemas: unidas por traço vertical à esquerda
-        val sysOf = IntArray(staves.size)
-        var sysN = 0
-        for (i in staves.indices) {
-            if (i == 0) { sysOf[i] = 0; sysN = 1; continue }
-            val a = staves[i - 1]; val b = staves[i]
-            var joined = false
-            for (dx in 0..(1.5 * sp).toInt()) {
-                val x = max(a.x0, b.x0) + dx
-                if (x >= w) break
-                var ok = true
-                for (y in a.bottom.roundToInt()..b.top.roundToInt()) if (!clean[y * w + x] && !im.ink[y * w + x]) { ok = false; break }
-                if (ok) { joined = true; break }
-            }
-            if (joined) sysOf[i] = sysOf[i - 1] else { sysOf[i] = sysN; sysN++ }
-        }
+        // pautas em sistemas, e as chaves/colchetes que marcam os grupos (piano, vozes)
+        val layout = Vision.layout(im, staves)
+        val sysOf = layout.systemOf
+        val sysN = layout.systems
 
         class StaffRead(val items: List<Item>, val clef: Char, val fifths: Int)
         val reads = ArrayList<StaffRead>()
@@ -300,19 +294,13 @@ object Omr {
             val si = staves.indexOf(s)
             val top = max(s.top - 6 * sp, if (si > 0) (staves[si - 1].bottom + s.top) / 2.0 else -1e9)
             val bot = min(s.bottom + 6 * sp, if (si < staves.size - 1) (s.bottom + staves[si + 1].top) / 2.0 else 1e9)
-            val bandTop = (s.top - 0.4 * sp).roundToInt(); val bandBot = (s.bottom + 0.4 * sp).roundToInt()
-            // clave: componente mais à esquerda alto
-            var clefComp = -1
-            if (debug) for (c in 1..cc0.n) if (cc0.minx[c] < s.x0 + 4 * sp && cc0.maxx[c] > s.x0 - 3 * sp && cc0.maxy[c] >= s.top - 3 * sp && cc0.miny[c] <= s.bottom + 3 * sp) println("  clefcand c=$c x=${cc0.minx[c]}..${cc0.maxx[c]} y=${cc0.miny[c]}..${cc0.maxy[c]}")
-            for (c in 1..cc0.n) {
-                val bw = cc0.maxx[c] - cc0.minx[c] + 1; val bh = cc0.maxy[c] - cc0.miny[c] + 1
-                if (cc0.minx[c] < s.x0 - 2 * sp || cc0.minx[c] > s.x0 + 3.0 * sp) continue
-                if (bh < 2.3 * sp || bh > 8 * sp || bw < 1.1 * sp || bw > 5 * sp) continue
-                if (cc0.maxy[c] < bandTop || cc0.miny[c] > bandBot) continue
-                if (clefComp < 0 || cc0.minx[c] < cc0.minx[clefComp]) clefComp = c
-            }
-            val clefRight = if (clefComp > 0) cc0.maxx[clefComp] else s.x0
-            val clef = if (clefComp > 0 && cc0.maxy[clefComp] > s.bottom + 0.6 * sp) 'G' else if (clefComp > 0) 'F' else 'G'
+            // clave pelo desenho (altura e posição contra as cinco linhas) e armadura logo depois dela
+            val clefComp = -1
+            val cr = Vision.clef(clean, w, h, s)
+            val clefRight = cr.right
+            val clef = if (cr.clef == '?') 'G' else cr.clef
+            val keyRead = Vision.keySignature(clean, w, h, s, clefRight, clef)
+            if (debug) println("  CLAVE=${cr.clef} conf=${"%.1f".format(cr.conf)} alt=${"%.2f".format(cr.height)} topo=${"%.2f".format(cr.top)} pontos=${cr.dots} dir=${clefRight.toInt()} armadura=${keyRead.fifths} (${keyRead.count} acidentes, cabe=${keyRead.fits})")
 
             // sinal de compasso (dois algarismos colados num só componente), logo depois da clave/armadura
             var timeLeft = Double.MAX_VALUE; var timeRight = 0.0
@@ -576,43 +564,10 @@ object Omr {
                     timeLeft = sy.cx - sy.bw / 2.0; timeRight = sy.cx + sy.bw / 2.0; used += sy.c; break
                 }
             }
-            // armadura: componentes largos (vários sustenidos/bemóis colados) são contados pelos traços verticais
-            var keyN = 0; var keySign = 0
-            run {
-                val firstHeadX0 = heads.firstOrNull()?.x ?: Double.MAX_VALUE
-                val lim = min(firstHeadX0, if (timeLeft == Double.MAX_VALUE) Double.MAX_VALUE else timeLeft)
-                for (sy in syms) {
-                    if (sy.c in used || sy.bw < 1.25 * sp || sy.bh < 1.8 * sp || sy.bh > 5.2 * sp) continue
-                    if (sy.cx <= clefRight || sy.cx + sy.bw / 2.0 > lim + 0.5 * sp) continue
-                    val strokes = ArrayList<DoubleArray>()      // x, y médio
-                    var runCols = ArrayList<Int>()
-                    var lastX = -9
-                    fun flush() {
-                        if (runCols.isNotEmpty()) {
-                            var sy0 = 0.0; var sn = 0
-                            for (xx in runCols) { var r = 0; var bestR = 0; var bestEnd = 0
-                                for (yy in cc.miny[sy.c]..cc.maxy[sy.c]) { if (cc.label[yy * w + xx] == sy.c) { r++; if (r > bestR) { bestR = r; bestEnd = yy } } else r = 0 }
-                                sy0 += bestEnd - bestR / 2.0; sn++ }
-                            strokes.add(doubleArrayOf(runCols.average(), sy0 / sn)); runCols = ArrayList()
-                        }
-                    }
-                    for (x in cc.minx[sy.c]..cc.maxx[sy.c]) {
-                        var r = 0; var best = 0
-                        for (y in cc.miny[sy.c]..cc.maxy[sy.c]) { if (cc.label[y * w + x] == sy.c) { r++; if (r > best) best = r } else r = 0 }
-                        if (best >= 1.5 * sp) { if (x - lastX > 1) flush(); runCols.add(x); lastX = x }
-                    }
-                    flush()
-                    if (debug) println("  keysig comp bw=${sy.bw} strokes=${strokes.map { "${it[0].toInt()}:${it[1].toInt()}" }}")
-                    if (strokes.isEmpty()) continue
-                    val glyphs = ArrayList<MutableList<DoubleArray>>()
-                    for (st in strokes) if (glyphs.isEmpty() || st[0] - glyphs.last().last()[0] > 0.62 * sp) glyphs.add(mutableListOf(st)) else glyphs.last().add(st)
-                    for (g in glyphs) {
-                        val kind = if (g.size == 1) -1 else if (abs(g[0][1] - g[1][1]) > 0.45 * sp) 0 else 1
-                        if (kind != 0) { keyN++; keySign += kind }
-                    }
-                    used += sy.c
-                }
-            }
+            // armadura: lida pelo desenho logo depois da clave (ver Vision.keySignature).
+            // Aqui só marcamos como usados os componentes que estão dentro dela, para não virarem acidente de nota nem pausa.
+            val keyRight = keyRead.right
+            for (sy in syms) if (sy.c !in used && sy.cx > clefRight && sy.cx <= keyRight + 0.15 * sp) used += sy.c
             // acidentes
             class Acc(val sym: Sym, val kind: Int) // kind: -1 bemol, 0 bequadro, 1 sustenido
             val accs = ArrayList<Acc>()
@@ -646,9 +601,9 @@ object Omr {
             for (a in accs.sortedBy { it.sym.cx }) {
                 val hd = heads.filter { it.x - a.sym.cx in 0.3 * sp..1.9 * sp && abs(it.y - (a.sym.cy + (if (a.kind == -1) 0.3 * sp else 0.0))) <= 1.4 * sp }.minByOrNull { abs(it.y - a.sym.cy) }
                 if (hd != null && hd.acc == null) hd.acc = a.kind
-                else if (a.sym.cx < firstHeadX && a.sym.cx > clefRight && (timeLeft == Double.MAX_VALUE || a.sym.cx < timeLeft)) { keyN++; keySign += a.kind }
+                else if (debug) println("  acidente sem nota em x=${a.sym.cx.toInt()}")
             }
-            val fifths = if (keySign < 0) -keyN else keyN
+            val fifths = keyRead.fifths
             // símbolos que são pedaços de cabeças já achadas (anel solto) não são pausas
             for (sy in syms) if (sy.c !in used && heads.any { it.x in cc.minx[sy.c] - 0.3 * sp..cc.maxx[sy.c] + 0.3 * sp && it.y in cc.miny[sy.c] - 0.3 * sp..cc.maxy[sy.c] + 0.3 * sp }) used += sy.c
             // pausas
@@ -704,22 +659,73 @@ object Omr {
         }
 
         // ---------- monta a partitura ----------
-        val nPart = (0 until sysN).map { sy -> staves.indices.count { sysOf[it] == sy } }.groupingBy { it }.eachCount().maxByOrNull { it.value }!!.key
-        val fifths0 = keySigs.firstOrNull() ?: 0
-        val perPart = List(nPart) { ArrayList<List<Item>>() }
-        val partClef = CharArray(nPart) { 'G' }
+        // O sistema mais cheio da página dá o molde das partes. Um sistema com menos pautas
+        // (o piano sozinho na introdução, por exemplo) é encaixado nas vagas do molde que combinam
+        // com a clave e com a chave/colchete dele, em vez de ser jogado fora.
+        val sysIdx = (0 until sysN).map { sy -> staves.indices.filter { sysOf[it] == sy } }
+        val tmplSys = sysIdx.indices.maxByOrNull { sysIdx[it].size } ?: 0
+        val tmpl = sysIdx[tmplSys]
+        val nPart = tmpl.size
+        fun braced(a: Int, b: Int) = layout.groups.any { it.kind == 'C' && it.first == a && it.last == b }
+        fun bracketed(a: Int, b: Int) = layout.groups.any { it.kind == '[' && it.first == a && it.last == b }
+        /** Encaixe monótono das pautas de um sistema nas vagas do molde, pelo menor custo. */
+        fun fit(idx: List<Int>): IntArray {
+            val k = idx.size
+            if (k == nPart) return IntArray(k) { it }
+            val inf = 1e9
+            val cost = Array(k) { i -> DoubleArray(nPart) { j ->
+                var c = if (reads[idx[i]].clef == reads[tmpl[j]].clef) 0.0 else 2.5
+                if (i + 1 < k && j + 1 < nPart) {
+                    val gi = braced(idx[i], idx[i + 1]); val gj = braced(tmpl[j], tmpl[j + 1])
+                    val bi = bracketed(idx[i], idx[i + 1]); val bj = bracketed(tmpl[j], tmpl[j + 1])
+                    if (gi && gj) c -= 3.0
+                    if (bi && bj) c -= 3.0
+                    if (gi != gj) c += 1.5
+                }
+                c
+            } }
+            val dp = Array(k) { DoubleArray(nPart) { inf } }
+            val from = Array(k) { IntArray(nPart) { -1 } }
+            for (j in 0 until nPart) dp[0][j] = cost[0][j]
+            for (i in 1 until k) for (j in i until nPart) {
+                var best = inf; var bj = -1
+                for (p in i - 1 until j) if (dp[i - 1][p] < best) { best = dp[i - 1][p]; bj = p }
+                if (bj >= 0) { dp[i][j] = best + cost[i][j]; from[i][j] = bj }
+            }
+            var endJ = -1; var best = inf
+            for (j in k - 1 until nPart) if (dp[k - 1][j] < best) { best = dp[k - 1][j]; endJ = j }
+            val out = IntArray(k)
+            var j = if (endJ >= 0) endJ else k - 1
+            for (i in k - 1 downTo 0) { out[i] = j; j = if (i > 0) from[i][j].coerceAtLeast(0) else j }
+            return out
+        }
+        // clave de cada parte: o que a maioria dos sistemas mostrou naquela vaga
+        val slotClefs = List(nPart) { ArrayList<Char>() }
+        val slotOf = ArrayList<IntArray>()
         for (sy in 0 until sysN) {
-            val idx = staves.indices.filter { sysOf[it] == sy }
-            if (idx.size != nPart) { warnings += "Um sistema tem ${idx.size} pauta(s) em vez de $nPart; foi ignorado."; continue }
-            for ((pi, si) in idx.withIndex()) {
-                if (sy == 0) partClef[pi] = reads[si].clef
+            val m = fit(sysIdx[sy]); slotOf.add(m)
+            for ((i, si) in sysIdx[sy].withIndex()) slotClefs[m[i]].add(reads[si].clef)
+        }
+        val fifths0 = (0 until sysN).map { sy -> sysIdx[sy].map { reads[it].fifths } }
+            .flatten().groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: 0
+        val perPart = List(nPart) { ArrayList<List<Item>>() }
+        val partClef = CharArray(nPart) { p -> slotClefs[p].groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: 'G' }
+        for (sy in 0 until sysN) {
+            val idx = sysIdx[sy]
+            if (idx.size < nPart) warnings += "Um sistema tem ${idx.size} pauta(s) em vez de $nPart; encaixei pela clave e pela chave."
+            val added = IntArray(nPart)
+            for ((ii, si) in idx.withIndex()) {
+                val pi = slotOf[sy][ii]
                 var cur = ArrayList<Item>()
                 for (it in reads[si].items) {
-                    if (it.kind == 2) { if (cur.isNotEmpty()) { perPart[pi].add(cur); cur = ArrayList() } }
+                    if (it.kind == 2) { if (cur.isNotEmpty()) { perPart[pi].add(cur); added[pi]++; cur = ArrayList() } }
                     else cur.add(it)
                 }
-                if (cur.isNotEmpty()) perPart[pi].add(cur)
+                if (cur.isNotEmpty()) { perPart[pi].add(cur); added[pi]++ }
             }
+            // as partes que este sistema não mostra ficam caladas pelos mesmos compassos, para não desalinhar
+            val mx = added.max()
+            for (p in 0 until nPart) repeat(mx - added[p]) { perPart[p].add(emptyList()) }
         }
         val sums = perPart.flatMap { p -> p.map { m -> m.sumOf { it.dur } } }.filter { it > 0 }
         val common = sums.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: 16
@@ -744,8 +750,28 @@ object Omr {
             var left = n
             for (d in intArrayOf(16, 12, 8, 6, 4, 3, 2, 1)) while (left >= d) { m.notes += Note(null, d); left -= d }
         }
+        // nome de cada parte pelo sinal de grupo: chave = piano, colchete = vozes
+        val slotName = arrayOfNulls<String>(nPart)
+        val slotGroup = arrayOfNulls<String>(nPart)
+        for (g in layout.groups) {
+            val sy = sysOf[g.first]
+            if (sy != sysOf[g.last]) continue
+            val ia = sysIdx[sy].indexOf(g.first); val ib = sysIdx[sy].indexOf(g.last)
+            if (ia < 0 || ib < 0) continue
+            val a = slotOf[sy][ia]; val b = slotOf[sy][ib]
+            if (b <= a || slotName[a] != null) continue
+            if (g.kind == 'C' && b - a == 1) {
+                slotName[a] = "Piano (mão direita)"; slotName[b] = "Piano (mão esquerda)"
+                slotGroup[a] = "piano"; slotGroup[b] = "piano"
+            } else if (g.kind == '[') {
+                for (j in a..b) { slotName[j] = if (b - a == 1) (if (j == a) "Vozes agudas" else "Vozes graves") else "Voz ${j - a + 1}"; slotGroup[j] = "coro" }
+            }
+        }
         for (pi in 0 until nPart) {
-            val part = Part("P${pi + 1}", if (nPart == 2) (if (pi == 0) "Piano (mão direita)" else "Piano (mão esquerda)") else "Parte ${pi + 1}", mutableListOf(), partClef[pi], if (nPart == 2) "piano" else "P${pi + 1}", "piano")
+            val part = Part("P${pi + 1}",
+                slotName[pi] ?: if (nPart == 2) (if (pi == 0) "Piano (mão direita)" else "Piano (mão esquerda)") else "Parte ${pi + 1}",
+                mutableListOf(), partClef[pi],
+                slotGroup[pi] ?: if (nPart == 2) "piano" else "P${pi + 1}", "piano")
             val base = if (partClef[pi] == 'F') 2 * 7 + 4 else 4 * 7 + 2
             for (mi in 0 until nMeas) {
                 val m = Measure(mi + 1)
@@ -753,9 +779,13 @@ object Omr {
                 var total = 0
                 val acc = HashMap<Int, Int>()
                 var clipped = false
-                if (src != null) for (it in src) {
+                // a parte está calada neste sistema (ou a página acabou): compasso de pausa, sem alarme
+                if (src == null || src.isEmpty()) { padRests(m, barLen); part.measures += m; continue }
+                // pausa de semibreve sozinha no compasso quer dizer "compasso inteiro", não "quatro tempos"
+                val wholeBarRest = src.size == 1 && src[0].kind == 1 && src[0].dur == 16
+                for (it in src) {
                     if (total >= barLen) { clipped = true; break }
-                    var d = it.dur
+                    var d = if (wholeBarRest) barLen else it.dur
                     if (total + d > barLen) { d = barLen - total; clipped = true }
                     if (it.kind == 1) m.notes += Note(null, d)
                     else {

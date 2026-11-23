@@ -43,7 +43,7 @@ private fun renderPdfPage(pr: PdfRenderer, index: Int, width: Int): Bitmap {
 }
 
 private fun medianSpace(im: OmrImage): Double {
-    val st = Omr.detectStaves(im)
+    val st = Vision.findStaves(im)
     if (st.isEmpty()) return 0.0
     return st.map { it.space }.sorted()[st.size / 2]
 }
@@ -90,7 +90,10 @@ fun ScanScreen(state: AppState) {
                             main.post { prog = i / n.toFloat(); progText = "Lendo página ${i + 1} de $n (imagem)…" }
                             var width = 1700
                             var bm = renderPdfPage(pr, i, width)
-                            var im = toOmr(bm, adaptive); bm.recycle()
+                            var im = toOmr(bm, adaptive)
+                            // página escaneada com luz irregular: se o limiar global não achou pauta, tenta o local
+                            if (!adaptive && medianSpace(im) <= 0.0) im = toOmr(bm, true)
+                            bm.recycle()
                             val sp = medianSpace(im)
                             if (sp in 1.0..8.5 && width < 3200) {
                                 width = minOf(3200, (width * 10.0 / sp).toInt())

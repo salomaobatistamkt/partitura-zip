@@ -246,6 +246,19 @@ object MusicXml {
         return score
     }
 
+    /** Figura e pontos de uma duração: 12 com divisions=4 é mínima pontuada. Null quando não cabe numa figura só. */
+    fun figure(dur: Int, divisions: Int): Pair<String, Int>? {
+        val bases = listOf(8 * divisions to "breve", 4 * divisions to "whole", 2 * divisions to "half", divisions to "quarter",
+            divisions / 2 to "eighth", divisions / 4 to "16th", divisions / 8 to "32nd", divisions / 16 to "64th")
+        for ((v, name) in bases) {
+            if (v <= 0) continue
+            if (dur == v) return name to 0
+            if (v % 2 == 0 && dur == v + v / 2) return name to 1
+            if (v % 4 == 0 && dur == v + v / 2 + v / 4) return name to 2
+        }
+        return null
+    }
+
     fun write(s: Score): String {
         fun esc(t: String) = t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         // pautas do mesmo grupo (piano) viram uma só <part> com <staves>
@@ -329,12 +342,52 @@ object MusicXml {
                         if (g.size > 1) sb.append("<staff>$staff</staff>")
                         sb.append("</harmony>\n")
                     }
-                    for (n in notes) {
+                    // pausa sozinha que ocupa o compasso inteiro é "pausa de compasso", sem figura
+                    val lone = notes.size == 1 && notes[0].pitch == null
+                    // feixes: notas menores que a semínima, dentro do mesmo tempo, andam unidas
+                    val beamsOf = HashMap<Int, String>()
+                    run {
+                        val beats = gm?.beats ?: s.beats; val bt = gm?.beatType ?: s.beatType
+                        val beat = if (bt == 8 && beats % 3 == 0) s.divisions * 3 / 2 else s.divisions * 4 / bt
+                        val idx = ArrayList<Int>(); val lvl = ArrayList<Int>(); val at = ArrayList<Int>()
+                        var t = 0
+                        for ((k, n) in notes.withIndex()) {
+                            if (n.chord) continue
+                            var l = 0; var d = n.duration
+                            while (d > 0 && d * (1 shl l) < s.divisions) l++
+                            if (n.pitch != null && l in 1..4 && figure(n.duration, s.divisions) != null) { idx.add(k); lvl.add(l); at.add(t) }
+                            else { idx.add(-1); lvl.add(0); at.add(t) }
+                            t += n.duration
+                        }
+                        var i = 0
+                        while (i < idx.size) {
+                            if (idx[i] < 0) { i++; continue }
+                            var j = i
+                            while (j + 1 < idx.size && idx[j + 1] >= 0 && beat > 0 && at[j + 1] / beat == at[i] / beat) j++
+                            if (j > i) for (k in i..j) {
+                                val sb2 = StringBuilder()
+                                for (b in 1..lvl[k]) {
+                                    val pv = if (k > i) lvl[k - 1] else 0
+                                    val nx = if (k < j) lvl[k + 1] else 0
+                                    val kind = when {
+                                        b > pv && b > nx -> "backward hook"
+                                        b > pv -> "begin"
+                                        b > nx -> "end"
+                                        else -> "continue"
+                                    }
+                                    sb2.append("<beam number=\"$b\">$kind</beam>")
+                                }
+                                beamsOf[idx[k]] = sb2.toString()
+                            }
+                            i = j + 1
+                        }
+                    }
+                    for ((ni, n) in notes.withIndex()) {
                         if (!n.chord) while (hi < hs.size && hs[hi].at < tcur + n.duration) { harm(hs[hi], (hs[hi].at - tcur).coerceAtLeast(0)); hi++ }
                         sb.append("      <note>")
                         if (n.chord) sb.append("<chord/>")
                         val pt = n.pitch
-                        if (pt == null) sb.append("<rest/>") else {
+                        if (pt == null) sb.append(if (lone) "<rest measure=\"yes\"/>" else "<rest/>") else {
                             sb.append("<pitch><step>${pt.step}</step>")
                             if (pt.alter != 0) sb.append("<alter>${pt.alter}</alter>")
                             sb.append("<octave>${pt.octave}</octave></pitch>")
@@ -343,7 +396,13 @@ object MusicXml {
                         if (n.tieStop) sb.append("<tie type=\"stop\"/>")
                         if (n.tieStart) sb.append("<tie type=\"start\"/>")
                         sb.append("<voice>${n.voice}</voice>")
+                        // sem <type> nenhum programa desenha haste, colchete nem ponto
+                        if (!lone) figure(n.duration, s.divisions)?.let { (name, dots) ->
+                            sb.append("<type>$name</type>")
+                            repeat(dots) { sb.append("<dot/>") }
+                        }
                         if (g.size > 1) sb.append("<staff>$staff</staff>")
+                        beamsOf[ni]?.let { sb.append(it) }
                         if (n.lyric != null) {
                             val syl = when (n.syl) { 'b' -> "begin"; 'm' -> "middle"; 'e' -> "end"; else -> "single" }
                             sb.append("<lyric number=\"1\"><syllabic>$syl</syllabic><text>${esc(n.lyric)}</text></lyric>")
